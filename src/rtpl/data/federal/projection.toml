@@ -1,0 +1,22 @@
+# How to build tax law for a year that has no data file yet.
+#
+# The newest enacted year is copied forward. Amounts listed under
+# `indexed` grow by the inflation rate each year (then round down to the
+# rounding step, as the IRS does). Everything else stays at its nominal
+# value, which is how the statute works for NIIT and Social Security
+# thresholds and the senior deduction.
+
+default_inflation = 0.025
+
+[indexed]
+ordinary_brackets = 50
+standard_deduction = 50
+additional_standard_deduction = 50
+capital_gains = 50
+irmaa_thresholds = 1000      # top IRMAA tier ($500k / $750k) is indexed from 2028 under current law
+aca_fpl = 10
+
+[sunsets]
+# Policy switches that turn off after a given year, applied while projecting.
+# Edit these to model an extension or an earlier repeal.
+senior_deduction = 2028

@@ -1,0 +1,77 @@
+# Federal tax law for tax year 2026. See 2025.toml for the format notes.
+
+year = 2026
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2025-32 (inflation adjustments, incorporating OBBBA)",
+  "One Big Beautiful Bill Act, P.L. 119-21 (OBBBA)",
+  "CMS 2026 Medicare Parts B and D premium fact sheets",
+  "HHS 2025 poverty guidelines (used for 2026 ACA coverage)",
+]
+
+[policy]
+personal_exemption = 0.0
+senior_deduction = true
+# The enhanced ACA credits expired after 2025, so the 400% FPL cliff returns.
+# Set this to true if Congress extends them.
+aca_enhanced_subsidies = false
+
+[ordinary_brackets]
+single = [[0, 0.10], [12400, 0.12], [50400, 0.22], [105700, 0.24], [201775, 0.32], [256225, 0.35], [640600, 0.37]]
+mfj    = [[0, 0.10], [24800, 0.12], [100800, 0.22], [211400, 0.24], [403550, 0.32], [512450, 0.35], [768700, 0.37]]
+mfs    = [[0, 0.10], [12400, 0.12], [50400, 0.22], [105700, 0.24], [201775, 0.32], [256225, 0.35], [384350, 0.37]]
+hoh    = [[0, 0.10], [17700, 0.12], [67450, 0.22], [105700, 0.24], [201750, 0.32], [256200, 0.35], [640600, 0.37]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200
+mfs    = 16100
+hoh    = 24150
+
+[additional_standard_deduction]
+unmarried = 2050
+married   = 1650
+
+[senior_deduction]
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+single = [[0, 0.0], [49450, 0.15], [545500, 0.20]]
+mfj    = [[0, 0.0], [98900, 0.15], [613700, 0.20]]
+mfs    = [[0, 0.0], [49450, 0.15], [306850, 0.20]]
+hoh    = [[0, 0.0], [66200, 0.15], [579600, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2026, set by MAGI from 2024.
+premium_year = 2026
+lookback_years = 2
+part_b_standard = 202.90
+tiers = [
+  { single = 109000, mfj = 218000, mfs = 109000, part_b = 284.10, part_d = 14.50 },
+  { single = 137000, mfj = 274000, mfs = 109000, part_b = 405.80, part_d = 37.50 },
+  { single = 171000, mfj = 342000, mfs = 109000, part_b = 527.50, part_d = 60.40 },
+  { single = 205000, mfj = 410000, mfs = 109000, part_b = 649.20, part_d = 83.30 },
+  { single = 500000, mfj = 750000, mfs = 391000, part_b = 689.90, part_d = 91.00 },
+]
+
+[aca]
+fpl_first_person = 15650
+fpl_each_additional = 5500
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00

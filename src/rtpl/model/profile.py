@@ -1,0 +1,119 @@
+"""The household's baseline financial starting point.
+
+A profile is a plain JSON document so it can be saved, shared and later
+extended for the forward-looking plan (which will add assumptions and an
+event list alongside this baseline rather than changing it).
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+SCHEMA_VERSION = 1
+
+FILING_STATUS_LABELS = {
+    "single": "Single",
+    "mfj": "Married filing jointly",
+    "mfs": "Married filing separately",
+    "hoh": "Head of household",
+    "qss": "Qualifying surviving spouse",
+}
+
+
+@dataclass
+class Person:
+    name: str = "Person 1"
+    birth_year: int = 1960
+    # None means "work it out from age" (enrolled at 65+). Set True for
+    # people on Medicare before 65 (for example SSDI recipients), or False
+    # for people 65+ who are not enrolled in Part B.
+    medicare_part_b: bool | None = None
+    blind: bool = False
+    social_security: float = 0.0  # annual gross benefit
+    wages: float = 0.0
+    pension: float = 0.0
+    ira_distributions: float = 0.0  # traditional IRA / 401(k), taxable part
+
+    def age_in(self, year: int) -> int:
+        """Age at the end of ``year`` (what the IRS uses for 65+ tests)."""
+        return year - self.birth_year
+
+    def on_medicare(self, year: int) -> bool:
+        if self.medicare_part_b is not None:
+            return self.medicare_part_b
+        return self.age_in(year) >= 65
+
+
+@dataclass
+class Household:
+    """Income that belongs to the household rather than one person."""
+
+    taxable_interest: float = 0.0
+    tax_exempt_interest: float = 0.0
+    qualified_dividends: float = 0.0
+    nonqualified_dividends: float = 0.0
+    long_term_capital_gains: float = 0.0  # net; may be negative
+    short_term_capital_gains: float = 0.0  # taxed as ordinary
+    other_ordinary_income: float = 0.0
+    other_investment_income: float = 0.0  # rents, royalties, passive (in NIIT)
+    adjustments: float = 0.0  # above-the-line deductions (HSA, etc.)
+    itemized_deductions: float = 0.0  # 0 = take the standard deduction
+    has_taxable_brokerage: bool = False
+    aca_marketplace: bool = False  # someone buys ACA marketplace coverage
+    household_size: int | None = None  # for FPL; None = number of people
+
+
+@dataclass
+class Profile:
+    year: int = 2026
+    filing_status: str = "single"
+    state: str | None = None
+    people: list[Person] = field(default_factory=lambda: [Person()])
+    household: Household = field(default_factory=Household)
+    name: str = "My plan"
+    schema_version: int = SCHEMA_VERSION
+
+    # -- derived ------------------------------------------------------
+    @property
+    def married(self) -> bool:
+        return self.filing_status in ("mfj", "mfs")
+
+    def ages(self) -> list[int]:
+        return [p.age_in(self.year) for p in self.people]
+
+    def fpl_household_size(self) -> int:
+        return self.household.household_size or max(1, len(self.people))
+
+    def total(self, attr: str) -> float:
+        return sum(getattr(p, attr) for p in self.people)
+
+    # -- persistence --------------------------------------------------
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Profile":
+        data = dict(data)
+        people = [Person(**p) for p in data.pop("people", [])] or [Person()]
+        household = Household(**data.pop("household", {}))
+        known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(people=people, household=household, **known)
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Profile":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    def validate(self) -> list[str]:
+        problems = []
+        if self.filing_status not in FILING_STATUS_LABELS:
+            problems.append(f"Unknown filing status {self.filing_status!r}")
+        if self.filing_status in ("mfj", "mfs") and len(self.people) != 2:
+            problems.append("Married filing statuses need two people")
+        if self.filing_status in ("single", "hoh", "qss") and len(self.people) != 1:
+            problems.append("This filing status takes one person")
+        return problems

@@ -1,0 +1,43 @@
+# Default chart colors. Copy this file to your user themes folder to change
+# any color; missing keys fall back to these values.
+#
+# The layer colors are a colorblind-checked categorical set, stepped
+# separately for light and dark backgrounds. Stack order (bottom to top) is
+# ordinary, ss, senior, cg, niit, state, and the colors are assigned in that
+# order so neighbouring bands stay distinguishable.
+
+name = "Default"
+
+[light]
+surface = "#fcfcfb"
+text_primary = "#0b0b0b"
+text_secondary = "#52514e"
+grid = "#e4e3df"
+total_line = "#0b0b0b"
+irmaa = "#6250d6"
+aca = "#e34948"
+
+[light.layers]
+ordinary = "#2a78d6"
+ss = "#eb6834"
+senior = "#1baf7a"
+cg = "#eda100"
+niit = "#e87ba4"
+state = "#008300"
+
+[dark]
+surface = "#1a1a19"
+text_primary = "#f0efec"
+text_secondary = "#c3c2b7"
+grid = "#34332f"
+total_line = "#f0efec"
+irmaa = "#9085e9"
+aca = "#e66767"
+
+[dark.layers]
+ordinary = "#3987e5"
+ss = "#d95926"
+senior = "#199e70"
+cg = "#c98500"
+niit = "#d55181"
+state = "#0ca30c"

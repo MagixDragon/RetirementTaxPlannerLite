@@ -1,0 +1,145 @@
+"""Draw the marginal tax graph with matplotlib.
+
+The renderer only needs a ``matplotlib.figure.Figure``, so the same code
+draws inside the Qt window and in the headless command-line exporter.
+"""
+
+from __future__ import annotations
+
+from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter, PercentFormatter
+
+from rtpl.engine.marginal import LAYERS, MarginalSeries
+from rtpl.model.profile import FILING_STATUS_LABELS
+from rtpl.theme import Palette
+
+
+def _money(v: float, _pos=None) -> str:
+    if abs(v) >= 1000:
+        return f"${v / 1000:,.0f}K"
+    return f"${v:,.0f}"
+
+
+def _escape(text: str) -> str:
+    """Stop matplotlib from reading dollar signs as math mode."""
+    return text.replace("$", r"\$")
+
+
+def render_marginal(
+    fig: Figure,
+    series: MarginalSeries,
+    visibility: dict[str, bool],
+    palette: Palette,
+    *,
+    show_total: bool = True,
+) -> None:
+    fig.clear()
+    fig.set_facecolor(palette.surface)
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(palette.surface)
+
+    xs = list(series.x) + [series.x[-1] + series.step]
+    shown = [k for k in LAYERS if visibility.get(k, False)]
+    bottom = [0.0] * len(series.x)
+    handles = []
+    for key in shown:
+        vals = series.layers[key]
+        top = [b + v for b, v in zip(bottom, vals)]
+        h = ax.fill_between(
+            xs,
+            bottom + [bottom[-1]],
+            top + [top[-1]],
+            step="post",
+            color=palette.layers[key],
+            linewidth=0.6,
+            edgecolor=palette.surface,  # thin surface gap between bands
+            label=series.layer_label(key),
+        )
+        handles.append(h)
+        bottom = top
+
+    # The total follows what is shown, so hiding the state layer gives a
+    # federal-only total.
+    hidden_total = bottom
+    if show_total and shown:
+        (line,) = ax.step(
+            xs,
+            hidden_total + [hidden_total[-1]],
+            where="post",
+            color=palette.total_line,
+            linewidth=1.4,
+            label="Total marginal rate (shown layers)",
+        )
+        handles.append(line)
+
+    ymax = max(max(hidden_total, default=0), max(bottom, default=0))
+    ax.set_ylim(min(0, min(hidden_total, default=0)) - 0.01, max(0.10, ymax * 1.18 + 0.02))
+    ax.set_xlim(0, xs[-1])
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    ax.xaxis.set_major_formatter(FuncFormatter(_money))
+
+    # Annotations: vertical lines with staggered labels so they do not collide.
+    ann = [a for a in series.annotations if visibility.get(a.kind, False)]
+    y_top = ax.get_ylim()[1]
+    levels = [0.97, 0.90, 0.83]
+    last_x_at_level: dict[int, float] = {}
+    min_gap = xs[-1] * 0.07
+    for a in sorted(ann, key=lambda a: a.x):
+        color = palette.irmaa if a.kind == "irmaa" else palette.aca
+        style = (0, (4, 3)) if a.kind == "irmaa" else (0, (1, 2))
+        ax.axvline(a.x, color=color, linewidth=1.2, linestyle=style)
+        level = 0
+        while level < len(levels) - 1 and a.x - last_x_at_level.get(level, -1e18) < min_gap:
+            level += 1
+        last_x_at_level[level] = a.x
+        near_right = a.x > xs[-1] * 0.88
+        ax.text(
+            a.x,
+            y_top * levels[level],
+            _escape(f"{a.label} " if near_right else f" {a.label}"),
+            color=palette.text_primary,
+            fontsize=8,
+            va="top",
+            ha="right" if near_right else "left",
+            bbox=dict(boxstyle="square,pad=0.15", facecolor=palette.surface, edgecolor="none", alpha=0.85),
+        )
+
+    p = series.profile
+    fs = FILING_STATUS_LABELS.get(p.filing_status, p.filing_status)
+    title = (
+        f"Marginal tax rate on additional {series.source.short_label}\n"
+        f"{p.year} · {fs} · baseline AGI {_money(series.baseline.agi)}, "
+        f"tax {_money(series.baseline.total_tax if visibility.get('state') else series.baseline.federal_tax)}"
+    )
+    ax.set_title(
+        _escape(title),
+        color=palette.text_primary,
+        fontsize=11,
+        loc="left",
+    )
+    ax.set_xlabel(f"Additional {series.source.label}", color=palette.text_secondary)
+    ax.set_ylabel("Marginal tax rate", color=palette.text_secondary)
+    ax.tick_params(colors=palette.text_secondary, labelsize=9)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(palette.grid)
+    ax.grid(axis="y", color=palette.grid, linewidth=0.8)
+    ax.set_axisbelow(True)
+
+    if handles:
+        leg = ax.legend(
+            handles=handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.14),
+            ncol=2,
+            frameon=False,
+            fontsize=8.5,
+        )
+        for t in leg.get_texts():
+            t.set_color(palette.text_primary)
+
+    notes = list(series.notes)
+    if notes:
+        fig.text(0.01, 0.01, _escape("  ".join(notes)), color=palette.text_secondary, fontsize=7.5)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.88, bottom=0.30)
