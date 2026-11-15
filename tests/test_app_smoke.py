@@ -7,6 +7,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+QtCore = pytest.importorskip("PySide6.QtCore")
 
 
 @pytest.fixture
@@ -19,6 +20,10 @@ def window(tmp_path, monkeypatch):
     yield w
     w.setWindowModified(False)  # never block on the save prompt in tests
     w.close()
+    # Destroy the window (and its child dialogs) now, while QApplication is
+    # alive; Qt objects left for interpreter shutdown can crash the process.
+    w.deleteLater()
+    app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
     app.processEvents()
 
 
@@ -80,7 +85,7 @@ def test_color_dialog_link_and_reset(window):
 
     theme = Theme.load(None)
     labels = {k: k for k in theme.raw["light"]["layers"]}
-    dlg = ColorDialog(theme, labels)
+    dlg = ColorDialog(theme, labels, window)  # parented, so it is cleaned up with the window
     theme.set_layer_color("light", "ordinary", "#123456")
     dlg.same.setChecked(True)
     assert theme.linked
