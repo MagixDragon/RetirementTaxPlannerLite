@@ -108,10 +108,19 @@ def build_marginal_series(
     x_max: float = 250_000,
     step: float = 100,
     include_state: bool = True,
+    irmaa_basis: str = "premium_year",
 ) -> MarginalSeries:
+    """Build the graph data.
+
+    ``irmaa_basis``: "premium_year" (default) draws the IRMAA tiers that
+    will apply to this year's income, i.e. the thresholds for the premium
+    year two years later, projected with ``profile.inflation`` when that
+    year has no data file. "current_year" draws this year's published
+    thresholds instead, for comparison with tools that show those.
+    """
     if step <= 0 or x_max <= 0:
         raise ValueError("x_max and step must be positive")
-    law = library.federal(profile.year)
+    law = library.federal(profile.year, profile.inflation)
     state = library.state(profile.state) if include_state and profile.state else None
 
     n = int(round(x_max / step))
@@ -158,7 +167,7 @@ def build_marginal_series(
             f"{profile.year} tax law is projected from {law.projected_from} "
             f"at {law.inflation_used:.1%} inflation."
         )
-    series.annotations.extend(irmaa_annotations(series, library))
+    series.annotations.extend(irmaa_annotations(series, library, irmaa_basis))
     series.annotations.extend(aca_annotations(series))
     return series
 
@@ -192,18 +201,28 @@ def medicare_people_in(profile: Profile, year: int) -> int:
     return count
 
 
-def irmaa_annotations(series: MarginalSeries, library: TaxLawLibrary) -> list[Annotation]:
+def irmaa_annotations(
+    series: MarginalSeries, library: TaxLawLibrary, basis: str = "premium_year"
+) -> list[Annotation]:
     profile = series.profile
+    if basis not in ("premium_year", "current_year"):
+        raise ValueError(f"Unknown IRMAA basis {basis!r}")
     premium_year = profile.year + series.law.irmaa_lookback
+    threshold_year = premium_year if basis == "premium_year" else profile.year
     try:
-        law = library.federal(premium_year)
+        law = library.federal(threshold_year, profile.inflation)
     except KeyError:
         return []
     grid = [i * series.step for i in range(len(series.results))]
     magi = [r.magi_irmaa for r in series.results]
     enrolled = medicare_people_in(profile, premium_year)
     people = enrolled or 1
-    estimate = " (estimated)" if law.status == "projected" else ""
+    if basis == "current_year":
+        estimate = f" (using {threshold_year} published thresholds and premiums)"
+    elif law.status == "projected":
+        estimate = f" (projected at {law.inflation_used:.1%} inflation)"
+    else:
+        estimate = ""
     out = []
     prev_b, prev_d = law.irmaa_part_b_standard, 0.0
     for n, tier in enumerate(law.irmaa_tiers, start=1):

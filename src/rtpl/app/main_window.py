@@ -281,6 +281,17 @@ class MainWindow(QMainWindow):
         xlabel = QLabel("Show up &to")
         xlabel.setBuddy(self.x_max)
         left.addRow(xlabel, self.x_max)
+        self.irmaa_basis = QComboBox()
+        self.irmaa_basis.addItem("Brackets for premiums 2 years out (projected)", "premium_year")
+        self.irmaa_basis.addItem("This year's published brackets", "current_year")
+        self.irmaa_basis.setAccessibleName("IRMAA brackets to show")
+        self.irmaa_basis.setToolTip(
+            "Income this year sets Medicare premiums two years from now, so the default "
+            "shows those brackets, projected with the profile's inflation rate."
+        )
+        ilabel = QLabel("&IRMAA brackets")
+        ilabel.setBuddy(self.irmaa_basis)
+        left.addRow(ilabel, self.irmaa_basis)
         lay.addLayout(left)
 
         grid = QGridLayout()
@@ -308,6 +319,7 @@ class MainWindow(QMainWindow):
 
         self.source.currentIndexChanged.connect(self._schedule)
         self.x_max.valueChanged.connect(self._schedule)
+        self.irmaa_basis.currentIndexChanged.connect(self._schedule)
         return box
 
     def _build_menus(self) -> None:
@@ -369,6 +381,7 @@ class MainWindow(QMainWindow):
                 source=IncomeSource(self.source.currentData()),
                 x_max=self.x_max.value(),
                 step=max(100.0, self.x_max.value() / 2500),
+                irmaa_basis=self.irmaa_basis.currentData(),
             )
         except (KeyError, ValueError) as exc:
             self.statusBar().showMessage(f"Cannot compute: {exc}")

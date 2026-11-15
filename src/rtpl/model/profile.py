@@ -73,6 +73,10 @@ class Profile:
     people: list[Person] = field(default_factory=lambda: [Person()])
     household: Household = field(default_factory=Household)
     name: str = "My plan"
+    # Inflation used to project tax law for years with no data file yet
+    # (for example the IRMAA brackets two years out). Also the starting
+    # point for the forward-looking plan's assumptions.
+    inflation: float = 0.025
     schema_version: int = SCHEMA_VERSION
 
     # -- derived ------------------------------------------------------

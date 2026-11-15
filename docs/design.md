@@ -122,6 +122,11 @@ lines rather than part of the rate:
   sits where MAGI (AGI + tax-exempt interest) crosses each tier for the
   premium year, using projected thresholds when that year has no file. The
   label gives the added yearly premium for the people who will be enrolled.
+  Projection uses the profile's *Inflation rate* (default 2.5%): the
+  thresholds are CPI-indexed and rounded to $1,000, and the top tier
+  ($500K / $750K) is frozen in statute until it starts indexing in 2028.
+  A *IRMAA brackets* option switches to this year's published brackets
+  for comparison with tools that show those.
 * **ACA.** Lines at 138% FPL (Medicaid in expansion states), 250% (cost
   sharing reductions) and, when enhanced credits are off, the 400% subsidy
   cliff, using ACA MAGI (AGI + tax-exempt interest + untaxed Social

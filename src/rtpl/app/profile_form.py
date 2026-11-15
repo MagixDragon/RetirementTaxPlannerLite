@@ -167,6 +167,19 @@ class ProfileForm(QWidget):
         _add_row(form, "Tax year", self.year)
         _add_row(form, "Filing status", self.filing)
         _add_row(form, "State of residence", self.state, "Optional. Adds a state tax layer.")
+        self.inflation = QDoubleSpinBox()
+        self.inflation.setSuffix("%")
+        self.inflation.setDecimals(1)
+        self.inflation.setRange(0.0, 15.0)
+        self.inflation.setSingleStep(0.1)
+        self.inflation.setMaximumWidth(80)
+        _add_row(
+            form,
+            "Inflation rate",
+            self.inflation,
+            "Yearly inflation used to project tax law for years with no data yet, "
+            "such as the IRMAA brackets two years ahead.",
+        )
         outer.addWidget(basics)
 
         self.person_boxes = [PersonBox("Person 1"), PersonBox("Person 2 (spouse)")]
@@ -197,6 +210,7 @@ class ProfileForm(QWidget):
         self.year.valueChanged.connect(self._year_changed)
         self.filing.currentIndexChanged.connect(self._filing_changed)
         self.state.currentIndexChanged.connect(self._emit)
+        self.inflation.valueChanged.connect(self._emit)
         self.brokerage.toggled.connect(self._emit)
         self.aca.toggled.connect(self._emit)
         self.household_size.valueChanged.connect(self._emit)
@@ -222,6 +236,7 @@ class ProfileForm(QWidget):
             self.year.setValue(profile.year)
             self.filing.setCurrentIndex(max(0, self.filing.findData(profile.filing_status)))
             self.state.setCurrentIndex(max(0, self.state.findData(profile.state)))
+            self.inflation.setValue(profile.inflation * 100)
             people = list(profile.people) + [Person(name="Person 2")] * (2 - len(profile.people))
             for box, person in zip(self.person_boxes, people):
                 box.set_person(person)
@@ -252,4 +267,5 @@ class ProfileForm(QWidget):
             state=self.state.currentData(),
             people=[b.person() for b in self.person_boxes[:n]],
             household=household,
+            inflation=round(self.inflation.value() / 100, 4),
         )

@@ -259,7 +259,7 @@ class TaxLawLibrary:
     user_dirs: list[Path] = field(default_factory=list)
     inflation: float | None = None  # None = use projection.toml default
     _federal_raw: dict[int, dict] = field(default_factory=dict, init=False, repr=False)
-    _cache: dict[int, FederalLaw] = field(default_factory=dict, init=False, repr=False)
+    _cache: dict[tuple[int, float], FederalLaw] = field(default_factory=dict, init=False, repr=False)
     _projection: dict = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -299,12 +299,21 @@ class TaxLawLibrary:
     def enacted_years(self) -> list[int]:
         return sorted(self._federal_raw)
 
-    def federal(self, year: int) -> FederalLaw:
-        if year not in self._cache:
-            self._cache[year] = self._build_federal(year)
-        return self._cache[year]
+    @property
+    def default_inflation(self) -> float:
+        if self.inflation is not None:
+            return self.inflation
+        return float(self._projection.get("default_inflation", 0.025))
 
-    def _build_federal(self, year: int) -> FederalLaw:
+    def federal(self, year: int, inflation: float | None = None) -> FederalLaw:
+        """Law for ``year``; ``inflation`` only matters for projected years."""
+        rate = self.default_inflation if inflation is None else float(inflation)
+        key = (year, 0.0 if year in self._federal_raw else rate)
+        if key not in self._cache:
+            self._cache[key] = self._build_federal(year, rate)
+        return self._cache[key]
+
+    def _build_federal(self, year: int, rate: float) -> FederalLaw:
         if year in self._federal_raw:
             return _parse_federal(self._federal_raw[year])
         years = self.enacted_years
@@ -312,9 +321,6 @@ class TaxLawLibrary:
             raise KeyError(f"No tax law data for {year} (earliest is {years[0]})")
         base_year = max(y for y in years if y < year)
         raw = copy.deepcopy(self._federal_raw[base_year])
-        rate = self.inflation
-        if rate is None:
-            rate = float(self._projection.get("default_inflation", 0.025))
         n = year - base_year
         factor = (1 + rate) ** n
         idx = self._projection.get("indexed", {})
@@ -342,12 +348,17 @@ class TaxLawLibrary:
                 )
         if "irmaa_thresholds" in idx:
             step = idx["irmaa_thresholds"]
-            for t in raw["irmaa"]["tiers"]:
+            # The top tier was frozen in law and starts indexing in a given year.
+            top_from = int(self._projection.get("irmaa_top_tier_indexed_from", 0))
+            top_n = max(0, year - max(base_year, top_from - 1)) if top_from else n
+            tiers = raw["irmaa"]["tiers"]
+            for i, t in enumerate(tiers):
+                f = (1 + rate) ** top_n if i == len(tiers) - 1 else factor
                 for k in ("single", "mfj", "mfs"):
-                    t[k] = _round_down(t[k] * factor, step)
+                    t[k] = _round_down(t[k] * f, step)
             # Premiums themselves grow too; use the same factor as an estimate.
             raw["irmaa"]["part_b_standard"] *= factor
-            for t in raw["irmaa"]["tiers"]:
+            for t in tiers:
                 t["part_b"] *= factor
                 t["part_d"] *= factor
         raw["irmaa"]["premium_year"] = year

@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", choices=[s.value for s in IncomeSource], default="ordinary")
     ap.add_argument("--x-max", type=float, default=250_000)
     ap.add_argument("--step", type=float, default=100)
+    ap.add_argument("--inflation", type=float, help="Override the profile's inflation rate, e.g. 0.03")
+    ap.add_argument(
+        "--irmaa-basis", choices=["premium_year", "current_year"], default="premium_year",
+        help="IRMAA brackets for the premium year two years out (default) or this year's",
+    )
     ap.add_argument("--mode", choices=["light", "dark"], default="light")
     ap.add_argument("--theme", help="Theme TOML overriding the default colors")
     ap.add_argument("--tax-law-dir", action="append", default=[], help="Extra tax-law folder")
@@ -50,9 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     if problems:
         print("Profile problems: " + "; ".join(problems), file=sys.stderr)
         return 2
+    if args.inflation is not None:
+        profile.inflation = args.inflation
     lib = TaxLawLibrary(user_dirs=args.tax_law_dir)
     series = build_marginal_series(
-        profile, lib, source=IncomeSource(args.source), x_max=args.x_max, step=args.step
+        profile, lib, source=IncomeSource(args.source), x_max=args.x_max, step=args.step,
+        irmaa_basis=args.irmaa_basis,
     )
     vis = default_visibility(series)
     vis.update({k: True for k in args.show})

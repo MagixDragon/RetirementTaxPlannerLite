@@ -97,3 +97,12 @@ def test_color_dialog_link_and_reset(window):
     dlg.same.setChecked(False)
     assert theme.palette("dark").surface != theme.palette("light").surface
     assert "same_layer_colors = false" in theme.to_toml()
+
+
+def test_inflation_and_irmaa_basis_controls(window):
+    window.form.inflation.setValue(3.0)
+    assert window.form.profile().inflation == 0.03
+    window.irmaa_basis.setCurrentIndex(1)
+    window.recompute()
+    irmaa = [a for a in window.series.annotations if a.kind == "irmaa"]
+    assert irmaa and "published thresholds" in irmaa[0].detail

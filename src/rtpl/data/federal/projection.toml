@@ -8,12 +8,16 @@
 
 default_inflation = 0.025
 
+# The top IRMAA tier ($500,000 / $750,000) is fixed in statute until it
+# starts indexing in this year.
+irmaa_top_tier_indexed_from = 2028
+
 [indexed]
 ordinary_brackets = 50
 standard_deduction = 50
 additional_standard_deduction = 50
 capital_gains = 50
-irmaa_thresholds = 1000      # top IRMAA tier ($500k / $750k) is indexed from 2028 under current law
+irmaa_thresholds = 1000      # CPI-U indexed, rounded to $1,000 (SSA uses nearest; we round down)
 aca_fpl = 10
 
 [sunsets]

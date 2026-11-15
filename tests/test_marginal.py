@@ -68,9 +68,10 @@ def test_ltcg_source(lib):
     assert rate_at(s, 1_000, "ordinary") == 0
 
 
-def test_irmaa_uses_two_year_lookback(lib_no_inflation):
+def test_irmaa_uses_two_year_lookback(lib):
     p = make(ages=(66,), people=[Person(birth_year=1960, ira_distributions=50_000)])
-    s = build_marginal_series(p, lib_no_inflation, x_max=250_000)
+    p.inflation = 0.0
+    s = build_marginal_series(p, lib, x_max=250_000)
     irmaa = [a for a in s.annotations if a.kind == "irmaa"]
     assert irmaa[0].magi == 109_000  # 2028 thresholds = 2026 values at 0% inflation
     assert irmaa[0].x == pytest.approx(59_000, abs=1)
@@ -145,3 +146,29 @@ def test_senior_phase_out_pushing_gains_is_charged_to_senior_layer(lib):
     assert rate_at(s, 40_000, "cg") == pytest.approx(0.15)
     assert rate_at(s, 40_000, "senior") == pytest.approx(0.12 * (0.12 + 0.15))
     assert rate_at(s, 40_000, "ordinary") == 0
+
+
+def test_irmaa_thresholds_follow_profile_inflation(lib):
+    p = make(people=[Person(birth_year=1960, ira_distributions=50_000)])
+    p.inflation = 0.03
+    s = build_marginal_series(p, lib, x_max=250_000)
+    first = [a for a in s.annotations if a.kind == "irmaa"][0]
+    assert first.magi == (109_000 * 1.03**2) // 1000 * 1000
+    assert "projected at 3.0% inflation" in first.detail
+
+
+def test_irmaa_current_year_basis(lib):
+    p = make(people=[Person(birth_year=1960, ira_distributions=50_000)])
+    s = build_marginal_series(p, lib, x_max=250_000, irmaa_basis="current_year")
+    first = [a for a in s.annotations if a.kind == "irmaa"][0]
+    assert first.magi == 109_000
+    assert "2026 published thresholds" in first.detail
+
+
+def test_irmaa_top_tier_frozen_until_2028():
+    from rtpl.taxlaw.loader import TaxLawLibrary
+
+    lib = TaxLawLibrary()
+    assert lib.federal(2027, 0.03).irmaa_tiers[-1].mfj == 750_000
+    assert lib.federal(2027, 0.03).irmaa_tiers[0].mfj == (218_000 * 1.03) // 1000 * 1000
+    assert lib.federal(2028, 0.03).irmaa_tiers[-1].mfj == (750_000 * 1.03) // 1000 * 1000
