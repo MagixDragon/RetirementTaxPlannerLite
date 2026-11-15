@@ -81,9 +81,9 @@ def render_marginal(
     # Annotations: vertical lines with staggered labels so they do not collide.
     ann = [a for a in series.annotations if visibility.get(a.kind, False)]
     y_top = ax.get_ylim()[1]
-    levels = [0.97, 0.90, 0.83]
+    levels = [0.97, 0.86, 0.75]
     last_x_at_level: dict[int, float] = {}
-    min_gap = xs[-1] * 0.07
+    min_gap = xs[-1] * 0.09
     for a in sorted(ann, key=lambda a: a.x):
         color = palette.irmaa if a.kind == "irmaa" else palette.aca
         style = (0, (4, 3)) if a.kind == "irmaa" else (0, (1, 2))
@@ -93,10 +93,12 @@ def render_marginal(
             level += 1
         last_x_at_level[level] = a.x
         near_right = a.x > xs[-1] * 0.88
+        lines = [a.label] + ([a.sublabel] if a.sublabel else [])
+        pad = lambda t: f"{t} " if near_right else f" {t}"  # noqa: E731
         ax.text(
             a.x,
             y_top * levels[level],
-            _escape(f"{a.label} " if near_right else f" {a.label}"),
+            _escape("\n".join(pad(t) for t in lines)),
             color=palette.text_primary,
             fontsize=8,
             va="top",
@@ -140,6 +142,8 @@ def render_marginal(
             t.set_color(palette.text_primary)
 
     notes = list(series.notes)
+    if visibility.get("irmaa") and series.irmaa_note and any(a.kind == "irmaa" for a in ann):
+        notes.append(series.irmaa_note)
     if notes:
-        fig.text(0.01, 0.01, _escape("  ".join(notes)), color=palette.text_secondary, fontsize=7.5)
+        fig.text(0.01, 0.01, _escape("\n".join(notes)), color=palette.text_secondary, fontsize=7.5, va="bottom")
     fig.subplots_adjust(left=0.08, right=0.98, top=0.88, bottom=0.30)

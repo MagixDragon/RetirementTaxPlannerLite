@@ -172,3 +172,13 @@ def test_irmaa_top_tier_frozen_until_2028():
     assert lib.federal(2027, 0.03).irmaa_tiers[-1].mfj == 750_000
     assert lib.federal(2027, 0.03).irmaa_tiers[0].mfj == (218_000 * 1.03) // 1000 * 1000
     assert lib.federal(2028, 0.03).irmaa_tiers[-1].mfj == (750_000 * 1.03) // 1000 * 1000
+
+
+def test_irmaa_labels_show_added_premium_and_footnote(lib):
+    p = make(people=[Person(birth_year=1960, ira_distributions=50_000)])
+    s = build_marginal_series(p, lib, x_max=250_000, irmaa_basis="current_year")
+    first = [a for a in s.annotations if a.kind == "irmaa"][0]
+    assert first.sublabel == f"+${(284.10 - 202.90 + 14.50) * 12:,.0f}/year"
+    assert s.irmaa_note.startswith("IRMAA lines: 2026 published brackets")
+    s2 = build_marginal_series(p, lib, x_max=250_000)
+    assert "2028 brackets (premium year for 2026 income), projected at 2.5%" in s2.irmaa_note

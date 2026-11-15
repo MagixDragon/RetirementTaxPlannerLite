@@ -56,6 +56,7 @@ class Annotation:
     label: str
     detail: str
     annual_cost: float | None = None  # IRMAA: extra premium per year
+    sublabel: str = ""  # second line on the chart, e.g. "+$2,413/year"
 
 
 @dataclass
@@ -71,6 +72,7 @@ class MarginalSeries:
     results: list[TaxResult]  # one per grid point, len(x) + 1
     annotations: list[Annotation] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    irmaa_note: str = ""  # footnote shown when the IRMAA lines are visible
 
     @property
     def total(self) -> list[float]:
@@ -223,6 +225,20 @@ def irmaa_annotations(
         estimate = f" (projected at {law.inflation_used:.1%} inflation)"
     else:
         estimate = ""
+    who = f"{people} person" if people == 1 else f"{people} people"
+    if basis == "current_year":
+        basis_text = f"{threshold_year} published brackets and premiums"
+    elif law.status == "projected":
+        basis_text = (
+            f"{threshold_year} brackets (premium year for {profile.year} income), "
+            f"projected at {law.inflation_used:.1%} inflation"
+        )
+    else:
+        basis_text = f"{threshold_year} brackets (premium year for {profile.year} income)"
+    series.irmaa_note = (
+        f"IRMAA lines: {basis_text}. Amounts are the added yearly Medicare premium "
+        f"(Part B + Part D) at each step, for {who}."
+    )
     out = []
     prev_b, prev_d = law.irmaa_part_b_standard, 0.0
     for n, tier in enumerate(law.irmaa_tiers, start=1):
@@ -232,7 +248,6 @@ def irmaa_annotations(
         prev_b, prev_d = tier.part_b, tier.part_d
         if x is None:
             continue
-        who = f"{people} person" if people == 1 else f"{people} people"
         out.append(
             Annotation(
                 kind="irmaa",
@@ -245,6 +260,7 @@ def irmaa_annotations(
                     f"({who}){estimate}"
                 ),
                 annual_cost=step_cost,
+                sublabel=f"+${step_cost:,.0f}/year",
             )
         )
     return out
