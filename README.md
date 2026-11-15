@@ -17,6 +17,18 @@ cliff lines on top.
 
 ## Run it
 
+With [uv](https://docs.astral.sh/uv/) (any OS, including Windows):
+
+```bash
+uv sync --extra dev              # creates .venv and installs the app plus pytest
+uv run rtpl                      # opens the desktop app
+uv run pytest                    # runs the tests
+uv run rtpl-chart examples/profiles/retired_couple_ca.json -o chart.png
+```
+
+With plain pip (`.` means "this folder's pyproject.toml", `-e` makes it
+editable, and `[dev]` adds the test tools):
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
