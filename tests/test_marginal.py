@@ -121,3 +121,27 @@ class TestDefaultVisibility:
         assert self.vis(lib, p)["aca"]
         old = make(people=[Person(birth_year=1955, ira_distributions=30_000)], aca_marketplace=True)
         assert not self.vis(lib, old)["aca"]
+
+
+def test_senior_phase_out_pushing_gains_is_charged_to_senior_layer(lib):
+    """Maeve's case: MFJ, both 65+, adding LTCG while the senior deduction phases out.
+
+    Taxable ordinary income (59,550+) sits below the 98,900 top of the 0% band
+    and gains straddle it. Each added gain dollar costs 15%, and the shrinking
+    senior deduction (12 cents per dollar for two people) adds 12 cents of
+    ordinary income at 12% plus pushes 12 cents of gains from 0% to 15%.
+    """
+    p = make(
+        fs="mfj",
+        people=[
+            Person(birth_year=1958, social_security=35_000, pension=15_000, ira_distributions=40_000),
+            Person(birth_year=1959, social_security=18_000, ira_distributions=2_000),
+        ],
+        taxable_interest=5_000,
+        qualified_dividends=16_500,
+    )
+    s = build_marginal_series(p, lib, source=IncomeSource.LTCG, x_max=60_000)
+    assert rate_at(s, 10_000, "cg") == 0  # still filling the 0% band
+    assert rate_at(s, 40_000, "cg") == pytest.approx(0.15)
+    assert rate_at(s, 40_000, "senior") == pytest.approx(0.12 * (0.12 + 0.15))
+    assert rate_at(s, 40_000, "ordinary") == 0

@@ -36,14 +36,36 @@ def _merge(base: dict, over: dict) -> dict:
 class Theme:
     raw: dict
 
+    @staticmethod
+    def default_raw() -> dict:
+        shipped = resources.files("rtpl") / "data" / "themes" / "default.toml"
+        return tomllib.loads(shipped.read_text(encoding="utf-8"))
+
     @classmethod
     def load(cls, override: str | Path | None = None) -> "Theme":
-        shipped = resources.files("rtpl") / "data" / "themes" / "default.toml"
-        raw = tomllib.loads(shipped.read_text(encoding="utf-8"))
+        raw = cls.default_raw()
         if override and Path(override).is_file():
             with open(override, "rb") as fh:
                 raw = _merge(raw, tomllib.load(fh))
         return cls(raw)
+
+    @property
+    def linked(self) -> bool:
+        """True when dark mode uses the light-mode layer colors."""
+        return bool(self.raw.get("same_layer_colors", False))
+
+    @linked.setter
+    def linked(self, value: bool) -> None:
+        self.raw["same_layer_colors"] = bool(value)
+
+    def layer_colors(self, mode: str) -> dict[str, str]:
+        return dict(self.raw["light" if self.linked else mode]["layers"])
+
+    def reset_layers(self) -> None:
+        """Put every layer color back to the shipped defaults."""
+        defaults = self.default_raw()
+        for mode in ("light", "dark"):
+            self.raw[mode]["layers"] = dict(defaults[mode]["layers"])
 
     def palette(self, mode: str) -> Palette:
         if mode not in ("light", "dark"):
@@ -58,14 +80,18 @@ class Theme:
             total_line=d["total_line"],
             irmaa=d["irmaa"],
             aca=d["aca"],
-            layers=dict(d["layers"]),
+            layers=self.layer_colors(mode),
         )
 
     def set_layer_color(self, mode: str, layer: str, color: str) -> None:
         self.raw[mode]["layers"][layer] = color
 
     def to_toml(self) -> str:
-        lines = [f'name = "{self.raw.get("name", "Custom")}"', ""]
+        lines = [
+            f'name = "{self.raw.get("name", "Custom")}"',
+            f"same_layer_colors = {'true' if self.linked else 'false'}",
+            "",
+        ]
         for mode in ("light", "dark"):
             d = self.raw[mode]
             lines.append(f"[{mode}]")

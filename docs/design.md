@@ -96,14 +96,21 @@ For each $100 step (finer steps for wider ranges), the engine recomputes the
 whole return and splits the change in tax into layers using counterfactual
 recomputation, so the layers always sum exactly to the real change:
 
-| Layer | How it is isolated |
+| Layer (stack order, bottom up) | How it is isolated |
 |---|---|
 | Tax on Ordinary Income | ordinary tax change with taxable SS and the senior deduction frozen |
-| Social Security Taxation Phase-In | extra ordinary tax from newly taxable SS (senior deduction frozen) |
-| Enhanced Senior Deduction Phase-Out | the remaining ordinary tax change |
-| Capital Gains and Qualified Dividends Tax | change in preferential-rate tax, including gains pushed out of the 0% band |
+| Social Security Taxation Phase-In | extra federal income tax (ordinary and gains) from newly taxable SS, senior deduction frozen |
+| Capital Gains and Qualified Dividends Tax | gains tax change with taxable SS and the senior deduction frozen: the 0/15/20% rate on added gains, or gains pushed out of the 0% band by added ordinary income |
+| Enhanced Senior Deduction Phase-Out | the remaining federal income tax change, including gains it pushes out of the 0% band |
 | Net Investment Income Tax | change in NIIT |
 | State Tax (XX) | change in state tax, labelled with the state code |
+
+Knock-on effects are charged to their cause. Example: a married couple,
+both over 65, adds long-term gains while the senior deduction is phasing
+out. Each extra dollar shrinks the deduction by 12 cents, which adds 12
+cents of ordinary income (12% bracket) and pushes 12 cents of existing
+gains out of the 0% band (15%). The graph shows 15% in the capital gains
+layer and 0.12 × (12% + 15%) = 3.24% in the senior deduction layer.
 
 The total line is the sum of the *shown* layers, so turning off the state
 layer gives a federal-only picture.

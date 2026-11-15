@@ -1,6 +1,7 @@
-"""Opens the main window offscreen and draws a chart. Skipped without Qt."""
+"""Opens the main window offscreen and exercises it. Skipped without Qt."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -8,23 +9,86 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
 
-def test_main_window_draws(tmp_path, monkeypatch):
+@pytest.fixture
+def window(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     from rtpl.app.main_window import MainWindow
-    from rtpl.model.profile import Profile
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     w = MainWindow()
-    w.form.set_profile(Profile.load("examples/profiles/retired_couple_ca.json"))
-    w.recompute()
-    assert w.series is not None and w.series.state.code == "CA"
-    assert w.checks["state"].text() == "State Tax (CA)"
-    assert w.table.rowCount() > 0
-    w.checks["state"].click()  # user turns the state layer off
-    assert w.visibility()["state"] is False
-    w.set_theme_mode("dark")
-    out = tmp_path / "chart.svg"
-    w.figure.savefig(out)
-    assert out.stat().st_size > 0
+    yield w
+    w.setWindowModified(False)  # never block on the save prompt in tests
     w.close()
     app.processEvents()
+
+
+def test_main_window_draws(window, tmp_path):
+    from rtpl.model.profile import Profile
+
+    path = Path("examples/profiles/retired_couple_ca.json")
+    window._load_profile(Profile.load(path), path)
+    window.recompute()
+    assert window.series is not None and window.series.state.code == "CA"
+    assert window.checks["state"].text() == "State Tax (CA)"
+    assert window.table.rowCount() > 0
+    window.checks["state"].click()  # user turns the state layer off
+    assert window.visibility()["state"] is False
+    window.set_theme_mode("dark")
+    out = tmp_path / "chart.svg"
+    window.figure.savefig(out)
+    assert out.stat().st_size > 0
+
+
+def test_title_tracks_file_and_changes(window):
+    from rtpl.model.profile import Profile
+
+    assert window.windowTitle().startswith("Untitled[*]")
+    assert not window.isWindowModified()
+    path = Path("examples/profiles/retired_couple_ca.json")
+    window._load_profile(Profile.load(path), path)
+    assert window.windowTitle().startswith("retired_couple_ca.json[*]")
+    window.form.plan_name.setText("Edited")
+    assert window.isWindowModified()
+    window.setWindowModified(False)
+    window.new_profile()
+    assert window.windowTitle().startswith("Untitled[*]")
+
+
+def test_age_shown_next_to_birth_year(window):
+    box = window.form.person_boxes[0]
+    window.form.year.setValue(2026)
+    box.birth_year.setValue(1958)
+    assert box.age.text() == "Age 68 at end of 2026"
+    window.form.year.setValue(2030)
+    assert box.age.text() == "Age 72 at end of 2030"
+
+
+def test_safe_file_stem():
+    from rtpl.app.main_window import safe_file_stem
+
+    assert safe_file_stem('Plan: A/B "v2"?') == "Plan_ A_B _v2__"
+    assert safe_file_stem("  trailing dots... ") == "trailing dots"
+    assert safe_file_stem("CON") == "_CON"
+    assert safe_file_stem("nul.backup") == "_nul.backup"
+    assert safe_file_stem("") == "profile"
+    assert safe_file_stem("a\\b|c<d>e*f") == "a_b_c_d_e_f"
+
+
+def test_color_dialog_link_and_reset(window):
+    from rtpl.app.main_window import ColorDialog
+    from rtpl.theme import Theme
+
+    theme = Theme.load(None)
+    labels = {k: k for k in theme.raw["light"]["layers"]}
+    dlg = ColorDialog(theme, labels)
+    theme.set_layer_color("light", "ordinary", "#123456")
+    dlg.same.setChecked(True)
+    assert theme.linked
+    assert theme.palette("dark").layers["ordinary"] == "#123456"
+    assert dlg.buttons[("dark", "ordinary")].isHidden()
+    dlg._reset()
+    assert theme.raw["light"]["layers"]["ordinary"] == Theme.default_raw()["light"]["layers"]["ordinary"]
+    assert theme.palette("dark").layers == theme.palette("light").layers
+    dlg.same.setChecked(False)
+    assert theme.palette("dark").surface != theme.palette("light").surface
+    assert "same_layer_colors = false" in theme.to_toml()

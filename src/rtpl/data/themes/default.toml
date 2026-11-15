@@ -3,10 +3,13 @@
 #
 # The layer colors are a colorblind-checked categorical set, stepped
 # separately for light and dark backgrounds. Stack order (bottom to top) is
-# ordinary, ss, senior, cg, niit, state, and the colors are assigned in that
+# ordinary, ss, cg, senior, niit, state, and the colors are assigned in that
 # order so neighbouring bands stay distinguishable.
 
 name = "Default"
+
+# true = dark mode uses the [light.layers] colors too.
+same_layer_colors = false
 
 [light]
 surface = "#fcfcfb"
@@ -20,8 +23,8 @@ aca = "#e34948"
 [light.layers]
 ordinary = "#2a78d6"
 ss = "#eb6834"
-senior = "#1baf7a"
-cg = "#eda100"
+cg = "#1baf7a"
+senior = "#eda100"
 niit = "#e87ba4"
 state = "#008300"
 
@@ -37,7 +40,7 @@ aca = "#e66767"
 [dark.layers]
 ordinary = "#3987e5"
 ss = "#d95926"
-senior = "#199e70"
-cg = "#c98500"
+cg = "#199e70"
+senior = "#c98500"
 niit = "#d55181"
 state = "#0ca30c"

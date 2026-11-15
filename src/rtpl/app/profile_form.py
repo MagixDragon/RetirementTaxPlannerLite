@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QHBoxLayout,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -76,12 +77,25 @@ class PersonBox(QGroupBox):
         self.name = QLineEdit()
         self.birth_year = QSpinBox()
         self.birth_year.setRange(1900, 2100)
+        self.birth_year.setMaximumWidth(80)
+        self.age = QLabel()
+        self.age.setAccessibleName("Calculated age")
+        self._tax_year = 2026
+        birth_row = QWidget()
+        row = QHBoxLayout(birth_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.birth_year)
+        row.addSpacing(12)
+        row.addWidget(self.age, 1)
         self.medicare = QComboBox()
         for text, _ in MEDICARE_CHOICES:
             self.medicare.addItem(text)
         self.blind = QCheckBox("Legally blind")
         _add_row(form, "Name", self.name)
-        _add_row(form, "Birth year", self.birth_year)
+        birth_label = QLabel("Birth year")
+        birth_label.setBuddy(self.birth_year)
+        self.birth_year.setAccessibleName("Birth year")
+        form.addRow(birth_label, birth_row)
         _add_row(
             form,
             "Medicare Part B enrolled",
@@ -97,8 +111,17 @@ class PersonBox(QGroupBox):
             box.valueChanged.connect(self.changed)
         self.name.textChanged.connect(self.changed)
         self.birth_year.valueChanged.connect(self.changed)
+        self.birth_year.valueChanged.connect(self._update_age)
         self.medicare.currentIndexChanged.connect(self.changed)
         self.blind.toggled.connect(self.changed)
+
+    def set_tax_year(self, year: int) -> None:
+        self._tax_year = year
+        self._update_age()
+
+    def _update_age(self, *_args) -> None:
+        age = self._tax_year - self.birth_year.value()
+        self.age.setText(f"Age {age} at end of {self._tax_year}")
 
     def set_person(self, p: Person) -> None:
         self.name.setText(p.name)
@@ -171,7 +194,7 @@ class ProfileForm(QWidget):
         outer.addStretch(1)
 
         self.plan_name.textChanged.connect(self._emit)
-        self.year.valueChanged.connect(self._emit)
+        self.year.valueChanged.connect(self._year_changed)
         self.filing.currentIndexChanged.connect(self._filing_changed)
         self.state.currentIndexChanged.connect(self._emit)
         self.brokerage.toggled.connect(self._emit)
@@ -181,6 +204,11 @@ class ProfileForm(QWidget):
     def _emit(self, *_args) -> None:
         if not self._loading:
             self.changed.emit()
+
+    def _year_changed(self, year: int) -> None:
+        for box in self.person_boxes:
+            box.set_tax_year(year)
+        self._emit()
 
     def _filing_changed(self, *_args) -> None:
         married = self.filing.currentData() in ("mfj", "mfs")
@@ -197,6 +225,7 @@ class ProfileForm(QWidget):
             people = list(profile.people) + [Person(name="Person 2")] * (2 - len(profile.people))
             for box, person in zip(self.person_boxes, people):
                 box.set_person(person)
+                box.set_tax_year(profile.year)
             for key, box in self.household_money.items():
                 box.setValue(getattr(profile.household, key))
             self.brokerage.setChecked(profile.household.has_taxable_brokerage)

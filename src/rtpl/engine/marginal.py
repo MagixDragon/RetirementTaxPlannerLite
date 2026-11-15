@@ -6,12 +6,19 @@ tax into layers. Because the split uses counterfactual recomputations, the
 layers always add up exactly to the true change in total tax:
 
 * ``ordinary``  bracket tax on the added dollars themselves
-* ``ss``        extra ordinary tax because more Social Security became taxable
-* ``senior``    extra ordinary tax because the senior deduction shrank
-* ``cg``        change in tax on qualified dividends and long-term gains
-                (direct, or ordinary income pushing gains out of the 0% band)
+* ``ss``        extra federal income tax because more Social Security became
+                taxable (its ordinary tax, plus any gains it pushes out of
+                the 0% band)
+* ``cg``        tax on added gains or dividends, and gains pushed out of the
+                0% band by the added ordinary income itself
+* ``senior``    extra federal income tax because the senior deduction shrank
+                (again including gains it pushes out of the 0% band)
 * ``niit``      Net Investment Income Tax
 * ``state``     the state layer
+
+So the capital gains layer stays at the statutory 0/15/20% on the added
+income; the knock-on effects of the Social Security and senior deduction
+phase-ins are charged to those layers, where they come from.
 
 IRMAA and ACA are cliffs in premiums rather than taxes, so they are
 returned as annotations (where along the X axis each threshold is crossed)
@@ -28,7 +35,7 @@ from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
 from .tax import IncomeSource, TaxResult, compute_tax
 
-LAYERS = ("ordinary", "ss", "senior", "cg", "niit", "state")
+LAYERS = ("ordinary", "ss", "cg", "senior", "niit", "state")  # stack order, bottom up
 ANNOTATIONS = ("irmaa", "aca")
 
 LAYER_LABELS = {
@@ -115,7 +122,7 @@ def build_marginal_series(
     for i in range(n):
         a, b = results[i], results[i + 1]
         xb = grid[i + 1]
-        # Ordinary tax with Social Security and senior deduction frozen at a
+        # Tax with taxable Social Security and the senior deduction frozen at a
         frozen_both = compute_tax(
             profile, law, state, extra=xb, source=source,
             taxable_ss_override=a.taxable_social_security,
@@ -125,10 +132,13 @@ def build_marginal_series(
             profile, law, state, extra=xb, source=source,
             senior_deduction_override=a.senior_deduction,
         )
+        def income_tax(r: TaxResult) -> float:
+            return r.ordinary_tax + r.capital_gains_tax
+
         layers["ordinary"].append((frozen_both.ordinary_tax - a.ordinary_tax) / step)
-        layers["ss"].append((frozen_senior.ordinary_tax - frozen_both.ordinary_tax) / step)
-        layers["senior"].append((b.ordinary_tax - frozen_senior.ordinary_tax) / step)
-        layers["cg"].append((b.capital_gains_tax - a.capital_gains_tax) / step)
+        layers["cg"].append((frozen_both.capital_gains_tax - a.capital_gains_tax) / step)
+        layers["ss"].append((income_tax(frozen_senior) - income_tax(frozen_both)) / step)
+        layers["senior"].append((income_tax(b) - income_tax(frozen_senior)) / step)
         layers["niit"].append((b.niit - a.niit) / step)
         layers["state"].append((b.state_tax - a.state_tax) / step)
 

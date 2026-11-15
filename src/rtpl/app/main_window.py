@@ -7,7 +7,7 @@ from pathlib import Path
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import QStandardPaths, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QKeySequence, QPalette
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap, QGuiApplication, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -98,40 +98,101 @@ def apply_app_theme(app: QApplication, mode: str) -> str:
 
 
 class ColorDialog(QDialog):
-    """Pick the chart color for each layer, separately for light and dark."""
+    """Pick the chart color for each layer, for light and dark mode."""
 
     def __init__(self, theme: Theme, labels: dict[str, str], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Chart Colors")
         self.theme = theme
-        grid = QGridLayout(self)
+        self.labels = labels
+        self.buttons: dict[tuple[str, str], QPushButton] = {}
+        outer = QVBoxLayout(self)
+        self.same = QCheckBox("&Same colors for light and dark mode")
+        self.same.setChecked(theme.linked)
+        self.same.toggled.connect(self._link_toggled)
+        outer.addWidget(self.same)
+
+        grid = QGridLayout()
         grid.addWidget(QLabel("<b>Layer</b>"), 0, 0)
-        grid.addWidget(QLabel("<b>Light mode</b>"), 0, 1)
-        grid.addWidget(QLabel("<b>Dark mode</b>"), 0, 2)
+        self.light_header = QLabel()
+        self.dark_header = QLabel("<b>Dark mode</b>")
+        grid.addWidget(self.light_header, 0, 1)
+        grid.addWidget(self.dark_header, 0, 2)
         for row, key in enumerate(LAYERS, start=1):
             grid.addWidget(QLabel(labels[key]), row, 0)
             for col, mode in enumerate(("light", "dark"), start=1):
                 btn = QPushButton()
-                self._paint(btn, theme.raw[mode]["layers"][key])
-                btn.setAccessibleName(f"{labels[key]} color, {mode} mode")
-                btn.clicked.connect(lambda _=False, b=btn, m=mode, k=key: self._pick(b, m, k))
+                btn.clicked.connect(lambda _=False, m=mode, k=key: self._pick(m, k))
+                self.buttons[(mode, key)] = btn
                 grid.addWidget(btn, row, col)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        outer.addLayout(grid)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.RestoreDefaults
+        )
+        restore = buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults)
+        restore.setText("&Reset to Defaults")
+        restore.clicked.connect(self._reset)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        grid.addWidget(buttons, len(LAYERS) + 1, 0, 1, 3)
+        outer.addWidget(buttons)
+        self._refresh()
 
-    @staticmethod
-    def _paint(btn: QPushButton, color: str) -> None:
-        btn.setText(color)
-        btn.setStyleSheet(f"QPushButton {{ border-left: 18px solid {color}; padding: 4px 8px; }}")
+    def _refresh(self) -> None:
+        linked = self.theme.linked
+        self.light_header.setText("<b>Both modes</b>" if linked else "<b>Light mode</b>")
+        self.dark_header.setVisible(not linked)
+        for (mode, key), btn in self.buttons.items():
+            color = self.theme.raw[mode]["layers"][key]
+            btn.setText(color)
+            swatch = QPixmap(28, 16)
+            swatch.fill(QColor(color))
+            btn.setIcon(QIcon(swatch))
+            btn.setIconSize(swatch.size())
+            which = "light and dark mode" if linked else f"{mode} mode"
+            btn.setAccessibleName(f"{self.labels[key]} color, {which}")
+            if mode == "dark":
+                btn.setVisible(not linked)
+        self.adjustSize()
 
-    def _pick(self, btn: QPushButton, mode: str, key: str) -> None:
+    def _link_toggled(self, checked: bool) -> None:
+        self.theme.linked = checked
+        if checked:  # start the shared set from the light colors
+            for key in LAYERS:
+                self.theme.set_layer_color("dark", key, self.theme.raw["light"]["layers"][key])
+        self._refresh()
+
+    def _pick(self, mode: str, key: str) -> None:
         current = QColor(self.theme.raw[mode]["layers"][key])
-        color = QColorDialog.getColor(current, self, "Choose color")
+        color = QColorDialog.getColor(current, self, f"Choose color: {self.labels[key]}")
         if color.isValid():
             self.theme.set_layer_color(mode, key, color.name())
-            self._paint(btn, color.name())
+            if self.theme.linked:
+                self.theme.set_layer_color("dark", key, color.name())
+            self._refresh()
+
+    def _reset(self) -> None:
+        self.theme.reset_layers()
+        if self.theme.linked:
+            for key in LAYERS:
+                self.theme.set_layer_color("dark", key, self.theme.raw["light"]["layers"][key])
+        self._refresh()
+
+
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def safe_file_stem(name: str, fallback: str = "profile") -> str:
+    """Turn a plan name into a file name that is valid on Windows, macOS and Linux."""
+    cleaned = "".join("_" if c in '<>:"/\\|?*' or ord(c) < 32 else c for c in name)
+    cleaned = " ".join(cleaned.split()).strip(" .")
+    if not cleaned:
+        return fallback
+    if cleaned.split(".")[0].upper() in _RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
+    return cleaned[:120]
 
 
 class MainWindow(QMainWindow):
@@ -183,8 +244,9 @@ class MainWindow(QMainWindow):
         self._timer = QTimer(self, singleShot=True, interval=200)
         self._timer.timeout.connect(self.recompute)
         self.form.changed.connect(self._schedule)
+        self.form.changed.connect(self._mark_modified)
 
-        self.form.set_profile(self._starter_profile())
+        self._load_profile(self._starter_profile(), None)
         self.statusBar().showMessage("Ready")
 
     # -- building ------------------------------------------------------
@@ -374,12 +436,49 @@ class MainWindow(QMainWindow):
             self.redraw()
 
     # -- files -----------------------------------------------------------
-    def new_profile(self) -> None:
-        self.current_path = None
+    def _mark_modified(self) -> None:
+        self.setWindowModified(True)
+
+    def _update_title(self) -> None:
+        name = self.current_path.name if self.current_path else "Untitled"
+        self.setWindowTitle(f"{name}[*] - {APP_NAME}")
+
+    def _load_profile(self, profile: Profile, path: Path | None) -> None:
+        self.current_path = path
         self.overrides.clear()
-        self.form.set_profile(self._starter_profile())
+        self.form.set_profile(profile)
+        self.setWindowModified(False)
+        self._update_title()
+
+    def maybe_save(self) -> bool:
+        """Ask about unsaved changes. Returns False if the user cancels."""
+        if not self.isWindowModified():
+            return True
+        answer = QMessageBox.warning(
+            self,
+            APP_NAME,
+            "The profile has unsaved changes. Save them?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Save:
+            return self.save_profile()
+        return answer == QMessageBox.StandardButton.Discard
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt name)
+        if self.maybe_save():
+            event.accept()
+        else:
+            event.ignore()
+
+    def new_profile(self) -> None:
+        if self.maybe_save():
+            self._load_profile(self._starter_profile(), None)
 
     def open_profile(self) -> None:
+        if not self.maybe_save():
+            return
         path, _ = QFileDialog.getOpenFileName(self, "Open Profile", "", "Profiles (*.json)")
         if not path:
             return
@@ -388,28 +487,37 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Open Profile", f"Could not open the profile:\n{exc}")
             return
-        self.current_path = Path(path)
-        self.overrides.clear()
-        self.form.set_profile(profile)
-        self.setWindowTitle(f"{self.current_path.name} - {APP_NAME}")
+        self._load_profile(profile, Path(path))
 
-    def save_profile(self) -> None:
+    def save_profile(self) -> bool:
         if self.current_path is None:
-            self.save_profile_as()
-            return
-        self.form.profile().save(self.current_path)
+            return self.save_profile_as()
+        try:
+            self.form.profile().save(self.current_path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save Profile", f"Could not save the profile:\n{exc}")
+            return False
+        self.setWindowModified(False)
+        self._update_title()
         self.statusBar().showMessage(f"Saved {self.current_path}", 4000)
+        return True
 
-    def save_profile_as(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save Profile", "profile.json", "Profiles (*.json)")
-        if path:
-            self.current_path = Path(path)
-            self.save_profile()
-            self.setWindowTitle(f"{self.current_path.name} - {APP_NAME}")
+    def _suggested_path(self, suffix: str) -> str:
+        folder = self.current_path.parent if self.current_path else Path.home()
+        return str(folder / (safe_file_stem(self.form.plan_name.text()) + suffix))
+
+    def save_profile_as(self) -> bool:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Profile", self._suggested_path(".json"), "Profiles (*.json)"
+        )
+        if not path:
+            return False
+        self.current_path = Path(path)
+        return self.save_profile()
 
     def export_chart(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Chart", "marginal-tax.png", "PNG image (*.png);;SVG image (*.svg);;PDF (*.pdf)"
+            self, "Export Chart", self._suggested_path(".png"), "PNG image (*.png);;SVG image (*.svg);;PDF (*.pdf)"
         )
         if path:
             self.figure.savefig(path, dpi=200, facecolor=self.figure.get_facecolor())
