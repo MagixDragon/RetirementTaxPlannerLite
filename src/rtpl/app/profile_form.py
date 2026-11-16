@@ -10,17 +10,15 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QLabel,
     QLineEdit,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from rtpl.app.inputs import ComboBox, DoubleSpinBox, SpinBox
 from rtpl.model.profile import FILING_STATUS_LABELS, Household, Person, Profile
 
 PERSON_MONEY = [
@@ -54,8 +52,8 @@ FIELD_WIDTH = 124
 MEDICARE_CHOICES = [("Automatic (age 65+)", None), ("Yes", True), ("No", False)]
 
 
-def money_box(allow_negative: bool = False) -> QDoubleSpinBox:
-    box = QDoubleSpinBox()
+def money_box(allow_negative: bool = False) -> DoubleSpinBox:
+    box = DoubleSpinBox()
     box.setPrefix("$")
     box.setDecimals(0)
     box.setRange(-10_000_000 if allow_negative else 0, 10_000_000)
@@ -92,13 +90,13 @@ class PersonBox(QGroupBox):
         form = compact_form(QFormLayout(self))
         self.name = QLineEdit()
         self.name.setMinimumWidth(FIELD_WIDTH)
-        self.birth_year = QSpinBox()
+        self.birth_year = SpinBox()
         self.birth_year.setRange(1900, 2100)
         self.birth_year.setMaximumWidth(80)
         self.age = QLabel()
         self.age.setAccessibleName("Calculated age")
         self._tax_year = 2026
-        self.medicare = QComboBox()
+        self.medicare = ComboBox()
         for text, _ in MEDICARE_CHOICES:
             self.medicare.addItem(text)
         self.blind = QCheckBox("Legally blind")
@@ -115,7 +113,7 @@ class PersonBox(QGroupBox):
             "Choose Yes for Medicare before 65 (for example on SSDI), so IRMAA applies.",
         )
         form.addRow("", self.blind)
-        self.money: dict[str, QDoubleSpinBox] = {}
+        self.money: dict[str, DoubleSpinBox] = {}
         for key, text in PERSON_MONEY:
             box = money_box()
             self.money[key] = box
@@ -168,13 +166,13 @@ class ProfileForm(QWidget):
         form = compact_form(QFormLayout(basics))
         self.plan_name = QLineEdit()
         self.plan_name.setMinimumWidth(FIELD_WIDTH)
-        self.year = QSpinBox()
+        self.year = SpinBox()
         self.year.setRange(2025, 2100)
         self.year.setMaximumWidth(80)
-        self.filing = QComboBox()
+        self.filing = ComboBox()
         for key, text in FILING_STATUS_LABELS.items():
             self.filing.addItem(text, key)
-        self.state = QComboBox()
+        self.state = ComboBox()
         self.state.addItem("(none)", None)
         for code in states:
             self.state.addItem(code, code)
@@ -182,7 +180,7 @@ class ProfileForm(QWidget):
         _add_row(form, "Tax year", self.year)
         _add_row(form, "Filing status", self.filing)
         _add_row(form, "State of residence", self.state, "Optional. Adds a state tax layer.")
-        self.inflation = QDoubleSpinBox()
+        self.inflation = DoubleSpinBox()
         self.inflation.setSuffix("%")
         self.inflation.setDecimals(1)
         self.inflation.setRange(0.0, 15.0)
@@ -204,7 +202,7 @@ class ProfileForm(QWidget):
 
         hh = QGroupBox("Household income and settings")
         hform = compact_form(QFormLayout(hh))
-        self.household_money: dict[str, QDoubleSpinBox] = {}
+        self.household_money: dict[str, DoubleSpinBox] = {}
         for key, text in HOUSEHOLD_MONEY:
             box = money_box(allow_negative=key == "long_term_capital_gains")
             self.household_money[key] = box
@@ -214,7 +212,7 @@ class ProfileForm(QWidget):
         self.brokerage.setToolTip("The household has a taxable brokerage account.")
         self.aca = QCheckBox("ACA marketplace coverage")
         self.aca.setToolTip("The household buys health coverage on an ACA marketplace.")
-        self.household_size = QSpinBox()
+        self.household_size = SpinBox()
         self.household_size.setRange(0, 20)
         self.household_size.setSpecialValueText("Automatic")
         self.household_size.setMaximumWidth(FIELD_WIDTH)
