@@ -241,6 +241,7 @@ class MainWindow(QMainWindow):
         ):
             pinned = self._setting_bool(f"panels/{key}_pinned", default_pinned)
             open_ = self._setting_bool(f"panels/{key}_open", pinned)
+            panel.saved_width = int(self.settings.value(f"panels/{key}_width", 0) or 0)
             self.panels.add(panel, pinned, open_)
         self.panels.visibility_changed.connect(self._panel_state_changed)
         self.panels.pinned_changed.connect(self._panel_state_changed)
@@ -357,15 +358,38 @@ class MainWindow(QMainWindow):
         self._sync_panel_actions()
 
     def resize_to_screen(self) -> None:
-        """Open at 1400 x 900, or smaller on a smaller screen."""
+        """Restore the last size and position, or open at 1400 x 900
+        (smaller on a smaller screen), centered."""
+        geometry = self.settings.value("window/geometry")
+        if geometry is not None and self.restoreGeometry(geometry):
+            return
         screen = QGuiApplication.primaryScreen()
         if screen is None:
             self.resize(1400, 900)
             return
         avail = screen.availableGeometry()
-        self.resize(min(1400, avail.width()), min(900, avail.height()))
-        if avail.width() <= 1400 or avail.height() <= 900:
-            self.showMaximized()
+        w, h = min(1400, avail.width()), min(900, avail.height())
+        self.resize(w, h)
+        self.move(avail.x() + (avail.width() - w) // 2, avail.y() + (avail.height() - h) // 2)
+
+    def save_window_state(self) -> None:
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        for panel, key in ((self.inputs_panel, "inputs"), (self.options_panel, "options")):
+            if panel.saved_width:
+                self.settings.setValue(f"panels/{key}_width", panel.saved_width)
+        self.settings.sync()
+
+    def reset_layout(self) -> None:
+        """Forget saved window size, position and panel settings."""
+        self.settings.remove("window")
+        self.settings.remove("panels")
+        wide = self._screen_width() >= 1300
+        for panel, pinned in ((self.inputs_panel, True), (self.options_panel, wide)):
+            panel.saved_width = 0
+            self.panels.set_pinned(panel, pinned)
+            self.panels.set_open(panel, pinned)
+        self.showNormal()
+        self.resize_to_screen()
 
     def _screen_width(self) -> int:
         screen = QGuiApplication.primaryScreen()
@@ -413,6 +437,7 @@ class MainWindow(QMainWindow):
         v.addSeparator()
         v.addAction(self.inputs_action)
         v.addAction(self.options_action)
+        v.addAction(QAction("&Reset Window Layout", self, triggered=self.reset_layout))
         v.addSeparator()
         v.addAction(QAction("Chart &Colors…", self, triggered=self.edit_colors))
 
@@ -564,6 +589,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt name)
         if self.maybe_save():
+            self.save_window_state()
             event.accept()
         else:
             event.ignore()

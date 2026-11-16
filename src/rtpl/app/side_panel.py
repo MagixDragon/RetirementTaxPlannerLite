@@ -12,6 +12,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -43,10 +44,12 @@ class SidePanel(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(8, 4, 4, 0)
         self.title = QLabel(f"<b>{title.replace('&', '')}</b>")
-        self.pin = QToolButton()
-        self.pin.setCheckable(True)
-        self.pin.setAutoRaise(True)
+        # A check box shows the state itself (checked = pinned), so there is
+        # no "does the label say what it is or what it will do?" question.
+        self.pin = QCheckBox("Pinned")
+        self.pin.setAccessibleName(f"Pin {title.replace('&', '')} beside the graph")
         self.pin.toggled.connect(self._pin_changed)
+        self.saved_width = 0  # width the user dragged a pinned panel to
         self.close_btn = QToolButton()
         self.close_btn.setAutoRaise(True)
         self.close_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton))
@@ -55,6 +58,7 @@ class SidePanel(QFrame):
         self.close_btn.clicked.connect(self.close_requested)
         head.addWidget(self.title, 1)
         head.addWidget(self.pin)
+        head.addSpacing(4)
         head.addWidget(self.close_btn)
 
         self.scroll = QScrollArea()
@@ -80,14 +84,21 @@ class SidePanel(QFrame):
         self.setMinimumWidth(self.body.minimumSizeHint().width() + bar + 2 * self.frameWidth() + 2)
 
     def preferred_width(self) -> int:
-        return self.minimumWidth()
+        return max(self.minimumWidth(), self.saved_width)
 
     def _pin_changed(self, pinned: bool) -> None:
-        self.pin.setText("Unpin" if pinned else "Pin")
         self.pin.setToolTip(
-            "Let this panel pop open over the graph instead"
+            "Pinned: the panel stays open beside the graph. Uncheck to have it "
+            "pop open over the graph only when you need it."
             if pinned
-            else "Keep this panel open beside the graph"
+            else "Not pinned: the panel pops open over the graph and closes when you "
+            "click the graph or press Esc. Check to keep it open beside the graph."
+        )
+        # Floating panels get a highlight border so they never look pinned.
+        self.setProperty("floating", not pinned)
+        self.setStyleSheet(
+            "#SidePanel[floating=\"true\"] { border: 2px solid palette(highlight); "
+            "background: palette(window); }"
         )
         self.pin_toggled.emit(pinned)
 
@@ -114,6 +125,7 @@ class PanelHost(QObject):
         self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(center)
         self.splitter.setStretchFactor(0, 1)
+        self.splitter.splitterMoved.connect(self._remember_widths)
         lay = QHBoxLayout(workspace)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.splitter)
@@ -146,6 +158,9 @@ class PanelHost(QObject):
         if panel.pin.isChecked() != pinned:
             panel.pin.setChecked(pinned)  # re-enters through pin_toggled
             return
+        if pinned and not self._open[id(panel)]:
+            self._open[id(panel)] = True  # pinning a panel always shows it
+            self.visibility_changed.emit(panel, True)
         self._place(panel)
         self.pinned_changed.emit(panel, pinned)
 
@@ -203,6 +218,11 @@ class PanelHost(QObject):
             sizes[c] = max(0, sizes[c] - (want - sizes[idx]))
             sizes[idx] = want
             self.splitter.setSizes(sizes)
+
+    def _remember_widths(self, *_args) -> None:
+        for p in self.panels:
+            if self.is_pinned(p) and p.isVisible():
+                p.saved_width = p.width()
 
     def _float_geometry(self, panel: SidePanel) -> None:
         area = self.workspace.rect()

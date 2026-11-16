@@ -131,3 +131,29 @@ def test_panels_pin_and_pop_open(window):
     inputs.pin.click()  # pinning puts it beside the graph
     assert inputs.parent() is panels.splitter
     assert window.settings.value("panels/inputs_pinned") in (True, "true")
+
+
+def test_window_geometry_and_panel_width_restored(window):
+    from rtpl.app.main_window import MainWindow
+
+    window.resize(700, 500)  # the offscreen test screen is 800 x 600
+    window.inputs_panel.saved_width = 360
+    window.save_window_state()
+    again = MainWindow()
+    try:
+        again.resize_to_screen()
+        assert (again.width(), again.height()) == (700, 500)
+        assert again.inputs_panel.preferred_width() == 360
+        again.reset_layout()
+        assert again.settings.value("window/geometry") is None
+    finally:
+        again.setWindowModified(False)
+        again.deleteLater()
+
+
+def test_pin_check_box_shows_state(window):
+    panels, inputs = window.panels, window.inputs_panel
+    panels.set_pinned(inputs, True)
+    assert inputs.pin.isChecked() and inputs.pin.text() == "Pinned"
+    panels.set_pinned(inputs, False)
+    assert not inputs.pin.isChecked() and inputs.parent() is window.centralWidget()
