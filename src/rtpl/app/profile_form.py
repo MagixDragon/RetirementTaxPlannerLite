@@ -210,8 +210,10 @@ class ProfileForm(QWidget):
             self.household_money[key] = box
             _add_row(hform, text, box, MONEY_TIPS.get(key))
             box.valueChanged.connect(self._emit)
-        self.brokerage = QCheckBox("Has a taxable brokerage account")
-        self.aca = QCheckBox("Buys ACA marketplace health coverage")
+        self.brokerage = QCheckBox("Taxable brokerage account")
+        self.brokerage.setToolTip("The household has a taxable brokerage account.")
+        self.aca = QCheckBox("ACA marketplace coverage")
+        self.aca.setToolTip("The household buys health coverage on an ACA marketplace.")
         self.household_size = QSpinBox()
         self.household_size.setRange(0, 20)
         self.household_size.setSpecialValueText("Automatic")

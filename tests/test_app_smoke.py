@@ -113,7 +113,11 @@ def test_window_fits_small_screens(window):
     for panel in (window.inputs_panel, window.options_panel):
         window.panels.set_pinned(panel, True)
         window.panels.set_open(panel, True)
-    assert window.minimumSizeHint().width() <= 1000
+    # Widths follow the font, and CI runners use different fonts and sizes
+    # (Windows offscreen is much larger), so measure in average characters:
+    # at a typical 9 pt UI font (about 7-8 px a character) this is <= 1000 px.
+    chars = window.minimumSizeHint().width() / window.fontMetrics().averageCharWidth()
+    assert chars <= 125, f"minimum width is {chars:.0f} average characters"
 
 
 def test_panels_pin_and_pop_open(window):
@@ -137,13 +141,14 @@ def test_window_geometry_and_panel_width_restored(window):
     from rtpl.app.main_window import MainWindow
 
     window.resize(700, 500)  # the offscreen test screen is 800 x 600
-    window.inputs_panel.saved_width = 360
+    wide = window.inputs_panel.minimumWidth() + 40
+    window.inputs_panel.saved_width = wide
     window.save_window_state()
     again = MainWindow()
     try:
         again.resize_to_screen()
         assert (again.width(), again.height()) == (700, 500)
-        assert again.inputs_panel.preferred_width() == 360
+        assert again.inputs_panel.preferred_width() == wide
         again.reset_layout()
         assert again.settings.value("window/geometry") is None
     finally:
