@@ -58,6 +58,10 @@ Linux, see [docs/packaging.md](docs/packaging.md).
   gains), X range (default $0–$250K), and a checkbox per layer and
   annotation with suggested defaults from the profile.
 * Light, dark or system theme; chart colors editable per layer.
+* Fits small screens (down to 1024x768): the inputs and graph options are
+  side panels that stay open beside the graph, or with **Auto hide** open
+  over it only when needed (Ctrl+1, Ctrl+2). The window remembers its size,
+  position and panel layout; View > Reset Window Layout forgets them.
 * A data table that lists every rate change and threshold, for screen
   readers and for copying.
 * Export to PNG, SVG or PDF.
