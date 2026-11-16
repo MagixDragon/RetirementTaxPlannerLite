@@ -106,3 +106,28 @@ def test_inflation_and_irmaa_basis_controls(window):
     window.recompute()
     irmaa = [a for a in window.series.annotations if a.kind == "irmaa"]
     assert irmaa and "published thresholds" in irmaa[0].detail
+
+
+def test_window_fits_small_screens(window):
+    """Both panels pinned must still fit a 1024 px wide screen."""
+    for panel in (window.inputs_panel, window.options_panel):
+        window.panels.set_pinned(panel, True)
+        window.panels.set_open(panel, True)
+    assert window.minimumSizeHint().width() <= 1000
+
+
+def test_panels_pin_and_pop_open(window):
+    panels, inputs = window.panels, window.inputs_panel
+    window.resize(1024, 740)
+    window.show()
+    panels.set_pinned(inputs, False)
+    panels.set_open(inputs, False)
+    assert inputs.isHidden() and not window.inputs_action.isChecked()
+    window.inputs_action.trigger()  # pops open over the graph
+    assert inputs.isVisible() and inputs.parent() is window.centralWidget()
+    assert window.inputs_action.isChecked()
+    panels.close_floating()
+    assert inputs.isHidden()
+    inputs.pin.click()  # pinning puts it beside the graph
+    assert inputs.parent() is panels.splitter
+    assert window.settings.value("panels/inputs_pinned") in (True, "true")

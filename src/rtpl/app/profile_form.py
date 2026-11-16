@@ -10,7 +10,6 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QHBoxLayout,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -25,7 +24,7 @@ from PySide6.QtWidgets import (
 from rtpl.model.profile import FILING_STATUS_LABELS, Household, Person, Profile
 
 PERSON_MONEY = [
-    ("social_security", "Social Security (annual)"),
+    ("social_security", "Social Security"),
     ("wages", "Wages"),
     ("pension", "Pension"),
     ("ira_distributions", "IRA / 401(k) withdrawals"),
@@ -41,8 +40,16 @@ HOUSEHOLD_MONEY = [
     ("other_ordinary_income", "Other ordinary income"),
     ("other_investment_income", "Rental / passive income"),
     ("adjustments", "Above-the-line adjustments"),
-    ("itemized_deductions", "Itemized deductions (0 = standard)"),
+    ("itemized_deductions", "Itemized deductions"),
 ]
+
+MONEY_TIPS = {
+    "social_security": "Yearly Social Security benefit, before Medicare premiums.",
+    "itemized_deductions": "Leave at $0 to use the standard deduction.",
+}
+
+# Widest a number field needs to be: "$10,000,000" plus the arrows.
+FIELD_WIDTH = 124
 
 MEDICARE_CHOICES = [("Automatic (age 65+)", None), ("Yes", True), ("No", False)]
 
@@ -55,7 +62,16 @@ def money_box(allow_negative: bool = False) -> QDoubleSpinBox:
     box.setSingleStep(1000)
     box.setGroupSeparatorShown(True)
     box.setAccelerated(True)
+    box.setMaximumWidth(FIELD_WIDTH)
     return box
+
+
+def compact_form(form: QFormLayout) -> QFormLayout:
+    """Labels left, fields only as wide as they need, long labels wrap above."""
+    form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+    form.setHorizontalSpacing(8)
+    return form
 
 
 def _add_row(form: QFormLayout, text: str, widget: QWidget, tip: str | None = None) -> None:
@@ -73,20 +89,15 @@ class PersonBox(QGroupBox):
 
     def __init__(self, title: str) -> None:
         super().__init__(title)
-        form = QFormLayout(self)
+        form = compact_form(QFormLayout(self))
         self.name = QLineEdit()
+        self.name.setMinimumWidth(FIELD_WIDTH)
         self.birth_year = QSpinBox()
         self.birth_year.setRange(1900, 2100)
         self.birth_year.setMaximumWidth(80)
         self.age = QLabel()
         self.age.setAccessibleName("Calculated age")
         self._tax_year = 2026
-        birth_row = QWidget()
-        row = QHBoxLayout(birth_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.birth_year)
-        row.addSpacing(12)
-        row.addWidget(self.age, 1)
         self.medicare = QComboBox()
         for text, _ in MEDICARE_CHOICES:
             self.medicare.addItem(text)
@@ -95,10 +106,11 @@ class PersonBox(QGroupBox):
         birth_label = QLabel("Birth year")
         birth_label.setBuddy(self.birth_year)
         self.birth_year.setAccessibleName("Birth year")
-        form.addRow(birth_label, birth_row)
+        form.addRow(birth_label, self.birth_year)
+        form.addRow("", self.age)
         _add_row(
             form,
-            "Medicare Part B enrolled",
+            "Medicare Part B",
             self.medicare,
             "Choose Yes for Medicare before 65 (for example on SSDI), so IRMAA applies.",
         )
@@ -107,7 +119,7 @@ class PersonBox(QGroupBox):
         for key, text in PERSON_MONEY:
             box = money_box()
             self.money[key] = box
-            _add_row(form, text, box)
+            _add_row(form, text, box, MONEY_TIPS.get(key))
             box.valueChanged.connect(self.changed)
         self.name.textChanged.connect(self.changed)
         self.birth_year.valueChanged.connect(self.changed)
@@ -150,12 +162,15 @@ class ProfileForm(QWidget):
         super().__init__()
         self._loading = False
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(6, 6, 6, 6)
 
         basics = QGroupBox("Baseline")
-        form = QFormLayout(basics)
+        form = compact_form(QFormLayout(basics))
         self.plan_name = QLineEdit()
+        self.plan_name.setMinimumWidth(FIELD_WIDTH)
         self.year = QSpinBox()
         self.year.setRange(2025, 2100)
+        self.year.setMaximumWidth(80)
         self.filing = QComboBox()
         for key, text in FILING_STATUS_LABELS.items():
             self.filing.addItem(text, key)
@@ -188,18 +203,19 @@ class ProfileForm(QWidget):
             box.changed.connect(self._emit)
 
         hh = QGroupBox("Household income and settings")
-        hform = QFormLayout(hh)
+        hform = compact_form(QFormLayout(hh))
         self.household_money: dict[str, QDoubleSpinBox] = {}
         for key, text in HOUSEHOLD_MONEY:
             box = money_box(allow_negative=key == "long_term_capital_gains")
             self.household_money[key] = box
-            _add_row(hform, text, box)
+            _add_row(hform, text, box, MONEY_TIPS.get(key))
             box.valueChanged.connect(self._emit)
         self.brokerage = QCheckBox("Has a taxable brokerage account")
         self.aca = QCheckBox("Buys ACA marketplace health coverage")
         self.household_size = QSpinBox()
         self.household_size.setRange(0, 20)
         self.household_size.setSpecialValueText("Automatic")
+        self.household_size.setMaximumWidth(FIELD_WIDTH)
         hform.addRow("", self.brokerage)
         hform.addRow("", self.aca)
         _add_row(hform, "Household size (for FPL)", self.household_size)
