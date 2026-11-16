@@ -1,0 +1,28 @@
+# Colorado personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "CO"
+name = "Colorado"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Social Security is fully exempt at 65+; the 55-64 exemption (income-limited) is not modelled.",
+  "Pension/IRA subtraction $24,000 at 65+ ($20,000 at 55-64 not modelled).",
+]
+
+[brackets]
+single = [[0, 0.044]]
+mfj    = [[0, 0.044]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200
+
+[social_security]
+exempt_from_age = 65
+
+[[retirement_exclusions]]
+amount = 24000
+min_age = 65

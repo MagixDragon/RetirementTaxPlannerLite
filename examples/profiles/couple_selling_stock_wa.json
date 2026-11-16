@@ -1,0 +1,15 @@
+{
+  "name": "Couple in Washington selling appreciated stock",
+  "year": 2026,
+  "filing_status": "mfj",
+  "state": "WA",
+  "people": [
+    {"name": "Robin", "birth_year": 1957, "social_security": 40000, "ira_distributions": 50000},
+    {"name": "Kai", "birth_year": 1959, "social_security": 26000}
+  ],
+  "household": {
+    "qualified_dividends": 20000,
+    "long_term_capital_gains": 200000,
+    "has_taxable_brokerage": true
+  }
+}

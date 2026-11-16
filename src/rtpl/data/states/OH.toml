@@ -1,0 +1,23 @@
+# Ohio personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "OH"
+name = "Ohio"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Exemption phases down with income; retirement and senior credits and municipal income taxes not modelled.",
+]
+
+[brackets]
+single = [[0, 0], [26050, 0.0275]]
+mfj    = [[0, 0], [26050, 0.0275]]
+
+[standard_deduction]
+single = 0
+mfj    = 0
+
+[exemption]
+per_person = 2400

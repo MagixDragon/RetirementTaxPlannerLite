@@ -1,0 +1,21 @@
+# North Carolina personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "NC"
+name = "North Carolina"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Social Security exempt; IRA withdrawals and most pensions taxed (Bailey-settlement government pensions exempt, not modelled).",
+]
+
+[brackets]
+single = [[0, 0.0399]]
+mfj    = [[0, 0.0399]]
+
+[standard_deduction]
+single = 12750
+mfj    = 25500
+hoh    = 19125

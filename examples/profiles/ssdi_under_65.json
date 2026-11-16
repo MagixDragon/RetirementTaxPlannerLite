@@ -1,0 +1,9 @@
+{
+  "name": "SSDI recipient on Medicare before 65",
+  "year": 2026,
+  "filing_status": "single",
+  "people": [
+    {"name": "Riley", "birth_year": 1970, "social_security": 28000, "medicare_part_b": true}
+  ],
+  "household": {}
+}

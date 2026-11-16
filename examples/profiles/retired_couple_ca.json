@@ -1,0 +1,16 @@
+{
+  "name": "Retired couple in California",
+  "year": 2026,
+  "filing_status": "mfj",
+  "state": "CA",
+  "people": [
+    {"name": "Alex", "birth_year": 1958, "social_security": 36000, "pension": 12000},
+    {"name": "Sam", "birth_year": 1960, "social_security": 22000}
+  ],
+  "household": {
+    "taxable_interest": 2500,
+    "qualified_dividends": 6000,
+    "long_term_capital_gains": 4000,
+    "has_taxable_brokerage": true
+  }
+}

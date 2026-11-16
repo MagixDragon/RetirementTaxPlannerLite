@@ -1,0 +1,23 @@
+# Maine personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "ME"
+name = "Maine"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Pension deduction (reduced by Social Security) not modelled.",
+]
+
+[brackets]
+single = [[0, 0.058], [27399, 0.0675], [64849, 0.0715]]
+mfj    = [[0, 0.058], [54849, 0.0675], [129749, 0.0715]]
+
+[standard_deduction]
+single = 8350
+mfj    = 16700
+
+[exemption]
+per_person = 5300

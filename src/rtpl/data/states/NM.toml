@@ -1,0 +1,24 @@
+# New Mexico personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "NM"
+name = "New Mexico"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Social Security exempt below $100K single / $150K joint (a cliff).",
+  "65+ deduction and capital gains deduction not modelled.",
+]
+
+[brackets]
+single = [[0, 0.015], [5500, 0.032], [16500, 0.043], [33500, 0.047], [66500, 0.049], [210000, 0.059]]
+mfj    = [[0, 0.015], [8000, 0.032], [25000, 0.043], [50000, 0.047], [100000, 0.049], [315000, 0.059]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200
+
+[social_security]
+exempt_if_agi_at_most = { single = 100000, mfj = 150000 }

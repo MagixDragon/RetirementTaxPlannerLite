@@ -1,0 +1,21 @@
+# Louisiana personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "LA"
+name = "Louisiana"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+
+[brackets]
+single = [[0, 0.03]]
+mfj    = [[0, 0.03]]
+
+[standard_deduction]
+single = 12875
+mfj    = 25750
+
+[[retirement_exclusions]]
+amount = 6000
+min_age = 65

@@ -1,0 +1,24 @@
+# Wisconsin personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "WI"
+name = "Wisconsin"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+capital_gains_exclusion = 0.3
+notes = [
+  "Standard deduction phases out with income (not modelled); 30% of long-term gains excluded.",
+]
+
+[brackets]
+single = [[0, 0.035], [15110, 0.044], [51950, 0.053], [332720, 0.0765]]
+mfj    = [[0, 0.035], [20150, 0.044], [69260, 0.053], [443630, 0.0765]]
+
+[standard_deduction]
+single = 13960
+mfj    = 25840
+
+[exemption]
+per_person = 700

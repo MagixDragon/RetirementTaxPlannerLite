@@ -1,0 +1,24 @@
+# Pennsylvania personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "PA"
+name = "Pennsylvania"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Retirement income exempt after retirement age (59½ for IRAs). Local earned income taxes not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0307]]
+mfj    = [[0, 0.0307]]
+
+[standard_deduction]
+single = 0
+mfj    = 0
+
+[[retirement_exclusions]]
+amount = "unlimited"
+min_age = 60

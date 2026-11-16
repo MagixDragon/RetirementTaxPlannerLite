@@ -1,0 +1,27 @@
+# Rhode Island personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "RI"
+name = "Rhode Island"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Social Security exemption also requires full retirement age; limits approximated. $20,000 pension/IRA modification not modelled.",
+  "Standard deduction and exemptions phase out at high incomes (not modelled).",
+]
+
+[brackets]
+single = [[0, 0.0375], [82050, 0.0475], [186450, 0.0599]]
+mfj    = [[0, 0.0375], [82050, 0.0475], [186450, 0.0599]]
+
+[standard_deduction]
+single = 11200
+mfj    = 22400
+
+[exemption]
+per_person = 5250
+
+[social_security]
+exempt_if_agi_at_most = { single = 104200, mfj = 130250 }

@@ -1,0 +1,20 @@
+# Kentucky personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "KY"
+name = "Kentucky"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+
+[brackets]
+single = [[0, 0.035]]
+mfj    = [[0, 0.035]]
+
+[standard_deduction]
+single = 3360
+mfj    = 3360
+
+[[retirement_exclusions]]
+amount = 31110

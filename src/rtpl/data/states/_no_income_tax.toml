@@ -1,0 +1,3 @@
+# States with no broad personal income tax on wages and retirement income.
+# Washington has its own file (capital gains excise tax only).
+codes = ["AK", "FL", "NV", "NH", "SD", "TN", "TX", "WY"]

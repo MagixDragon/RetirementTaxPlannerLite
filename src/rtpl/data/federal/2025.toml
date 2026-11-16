@@ -1,0 +1,95 @@
+# Federal tax law for tax year 2025.
+#
+# Every value here is plain data: edit it, or copy this file to your user
+# tax-law folder and edit the copy, without touching any code.
+# Bracket lists are [lower_bound, rate] pairs, sorted ascending.
+# Filing status keys: single, mfj (married filing jointly), mfs (married
+# filing separately), hoh (head of household). Qualifying surviving spouse
+# uses the mfj values.
+
+year = 2025
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2024-40 (inflation adjustments)",
+  "One Big Beautiful Bill Act, P.L. 119-21 (OBBBA) section 70101-70103",
+  "CMS 2025 Medicare Parts B and D premium fact sheets",
+  "HHS 2024 poverty guidelines (used for 2025 ACA coverage)",
+]
+
+[policy]
+# TCJA-era rules made permanent by OBBBA. Flip these to model a different law.
+personal_exemption = 0.0                 # per person; 0 since TCJA, kept at 0 by OBBBA
+senior_deduction = true                  # OBBBA enhanced senior deduction, 2025-2028
+aca_enhanced_subsidies = true            # ARPA/IRA enhanced credits (no 400% FPL cliff)
+
+[ordinary_brackets]
+single = [[0, 0.10], [11925, 0.12], [48475, 0.22], [103350, 0.24], [197300, 0.32], [250525, 0.35], [626350, 0.37]]
+mfj    = [[0, 0.10], [23850, 0.12], [96950, 0.22], [206700, 0.24], [394600, 0.32], [501050, 0.35], [751600, 0.37]]
+mfs    = [[0, 0.10], [11925, 0.12], [48475, 0.22], [103350, 0.24], [197300, 0.32], [250525, 0.35], [375800, 0.37]]
+hoh    = [[0, 0.10], [17000, 0.12], [64850, 0.22], [103350, 0.24], [197300, 0.32], [250500, 0.35], [626350, 0.37]]
+
+[standard_deduction]
+# OBBBA raised the 2025 amounts after Rev. Proc. 2024-40 was published.
+single = 15750
+mfj    = 31500
+mfs    = 15750
+hoh    = 23625
+
+[additional_standard_deduction]
+# Per person aged 65+ (and again per person who is blind).
+unmarried = 2000
+married   = 1600
+
+[senior_deduction]
+# OBBBA section 70103: "enhanced senior deduction", available to itemizers too.
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true   # each eligible person's $6,000 shrinks by 6% of excess MAGI
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+# Rates applied to qualified dividends and net long-term capital gains,
+# stacked on top of ordinary taxable income.
+single = [[0, 0.0], [48350, 0.15], [533400, 0.20]]
+mfj    = [[0, 0.0], [96700, 0.15], [600050, 0.20]]
+mfs    = [[0, 0.0], [48350, 0.15], [300000, 0.20]]
+hoh    = [[0, 0.0], [64750, 0.15], [566700, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+# Net Investment Income Tax. Thresholds are set in statute, not indexed.
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+# Provisional income thresholds for taxing benefits. Not indexed.
+# mfs assumes the couple lived together during the year (base 0).
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2025, set by MAGI from 2023 (two-year lookback).
+# Each tier: income above `single`/`mfj`/`mfs` puts you in that tier.
+# part_b and part_d are the monthly amounts per enrolled person
+# (part_b is the full premium; part_d is the surcharge added to the plan premium).
+premium_year = 2025
+lookback_years = 2
+part_b_standard = 185.00
+tiers = [
+  { single = 106000, mfj = 212000, mfs = 106000, part_b = 259.00, part_d = 13.70 },
+  { single = 133000, mfj = 266000, mfs = 106000, part_b = 370.00, part_d = 35.30 },
+  { single = 167000, mfj = 334000, mfs = 106000, part_b = 480.90, part_d = 57.00 },
+  { single = 200000, mfj = 400000, mfs = 106000, part_b = 591.90, part_d = 78.60 },
+  { single = 500000, mfj = 750000, mfs = 394000, part_b = 628.90, part_d = 85.80 },
+]
+
+[aca]
+# Premium tax credit reference points for marketplace coverage in 2025.
+fpl_first_person = 15060
+fpl_each_additional = 5380
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00   # only a cliff when policy.aca_enhanced_subsidies is false

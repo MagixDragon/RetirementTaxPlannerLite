@@ -1,0 +1,15 @@
+{
+  "name": "Early retiree on ACA marketplace",
+  "year": 2026,
+  "filing_status": "single",
+  "state": "TX",
+  "people": [
+    {"name": "Jordan", "birth_year": 1964, "ira_distributions": 20000}
+  ],
+  "household": {
+    "taxable_interest": 1200,
+    "qualified_dividends": 3000,
+    "has_taxable_brokerage": true,
+    "aca_marketplace": true
+  }
+}

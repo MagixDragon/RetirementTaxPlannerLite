@@ -1,0 +1,28 @@
+# Connecticut personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "CT"
+name = "Connecticut"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Personal exemption ($15,000 single / $24,000 joint) phases out with income; modelled as $12,000 per person with no phase-out.",
+  "Pension/IRA exemption below $75K/$100K AGI and benefit recapture not modelled.",
+]
+
+[brackets]
+single = [[0, 0.02], [10000, 0.045], [50000, 0.055], [100000, 0.06], [200000, 0.065], [250000, 0.069], [500000, 0.0699]]
+mfj    = [[0, 0.02], [20000, 0.045], [100000, 0.055], [200000, 0.06], [400000, 0.065], [500000, 0.069], [1000000, 0.0699]]
+
+[standard_deduction]
+single = 0
+mfj    = 0
+
+[exemption]
+per_person = 12000
+
+[social_security]
+exempt_if_agi_at_most = { single = 75000, mfj = 100000 }
+exempt_fraction_above = 0.75

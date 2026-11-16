@@ -1,0 +1,15 @@
+{
+  "name": "Retired couple in North Carolina",
+  "year": 2026,
+  "filing_status": "mfj",
+  "state": "NC",
+  "people": [
+    {"name": "Pat", "birth_year": 1959, "social_security": 32000, "ira_distributions": 30000},
+    {"name": "Lee", "birth_year": 1961, "social_security": 20000, "pension": 18000}
+  ],
+  "household": {
+    "taxable_interest": 3000,
+    "qualified_dividends": 8000,
+    "has_taxable_brokerage": true
+  }
+}

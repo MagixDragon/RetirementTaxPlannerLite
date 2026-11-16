@@ -1,0 +1,23 @@
+# Oklahoma personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "OK"
+name = "Oklahoma"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+
+[brackets]
+single = [[0, 0], [3750, 0.025], [4900, 0.035], [7200, 0.045]]
+mfj    = [[0, 0], [7500, 0.025], [9800, 0.035], [14400, 0.045]]
+
+[standard_deduction]
+single = 6350
+mfj    = 12700
+
+[exemption]
+per_person = 1000
+
+[[retirement_exclusions]]
+amount = 10000
