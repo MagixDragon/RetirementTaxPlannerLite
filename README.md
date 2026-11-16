@@ -56,6 +56,10 @@ rtpl-chart examples/profiles/retired_couple_ca.json -o chart.svg --source ltcg -
 
 Run the tests with `pytest`.
 
+For a desktop or Start-menu shortcut with the app icon, run
+`uv run rtpl-shortcut`. To build a stand-alone app for Windows, macOS or
+Linux, see [docs/packaging.md](docs/packaging.md).
+
 ## What's in the box
 
 * Profile editor: tax year, filing status, state, one or two people
@@ -65,6 +69,10 @@ Run the tests with `pytest`.
   gains), X range (default $0–$250K), and a checkbox per layer and
   annotation with suggested defaults from the profile.
 * Light, dark or system theme; chart colors editable per layer.
+* Fits small screens (down to 1024x768): the inputs and graph options are
+  side panels that stay open beside the graph, or with **Auto hide** open
+  over it only when needed (Ctrl+1, Ctrl+2). The window remembers its size,
+  position and panel layout; View > Reset Window Layout forgets them.
 * A data table that lists every rate change and threshold, for screen
   readers and for copying.
 * Export to PNG, SVG or PDF.

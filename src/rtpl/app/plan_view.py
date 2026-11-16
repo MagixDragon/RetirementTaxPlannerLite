@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -48,6 +50,7 @@ class PlanView(QWidget):
         lay = QVBoxLayout(self)
         self.summary = QLabel("No plan loaded. Use File > Open Plan, or File > New Plan from Profile.")
         self.summary.setWordWrap(True)
+        self.summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(self.summary)
 
@@ -71,7 +74,16 @@ class PlanView(QWidget):
         blay.addLayout(left)
         self.lines_grid = QGridLayout()
         blay.addLayout(self.lines_grid, 1)
-        lay.addWidget(box)
+        # The options scroll sideways on narrow windows instead of setting the
+        # window's minimum width, so the side panels still fit small screens.
+        self.options_scroll = QScrollArea()
+        self.options_scroll.setWidget(box)
+        self.options_scroll.setWidgetResizable(True)
+        self.options_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.options_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.options_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        lay.addWidget(self.options_scroll)
+        self._fit_options_height()
 
         self.tabs = QTabWidget()
         self.income_fig = Figure(figsize=(9, 6), dpi=100)
@@ -151,6 +163,12 @@ class PlanView(QWidget):
             cb.clicked.connect(lambda checked, k=key: self._toggled(k, checked))
             self.line_checks[key] = cb
             self.lines_grid.addWidget(cb, n // cols, n % cols)
+        self._fit_options_height()
+
+    def _fit_options_height(self) -> None:
+        box = self.options_scroll.widget()
+        bar = self.options_scroll.horizontalScrollBar().sizeHint().height()
+        self.options_scroll.setFixedHeight(box.sizeHint().height() + bar)
 
     def visibility(self) -> dict[str, bool]:
         assert self.result is not None

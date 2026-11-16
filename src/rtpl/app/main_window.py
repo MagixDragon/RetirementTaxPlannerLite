@@ -1,4 +1,4 @@
-"""Main window: profile on the left, marginal graph and data table on the right."""
+"""Main window: the graph in the middle, inputs and graph options in side panels."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import QStandardPaths, Qt, QTimer
+from PySide6.QtCore import QSettings, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap, QGuiApplication, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,18 +25,20 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QScrollArea,
-    QSplitter,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
 from rtpl import __version__
+from rtpl.app.icon import about_pixmap
 from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
+from rtpl.app.side_panel import PanelHost, SidePanel
 from rtpl.charts.marginal_chart import render_marginal
 from rtpl.engine.marginal import (
     ANNOTATIONS,
@@ -210,21 +212,11 @@ class MainWindow(QMainWindow):
         self.series: MarginalSeries | None = None
         self.overrides: dict[str, bool] = {}  # user's explicit layer choices
 
-        # Left: profile editor
-        self.form = ProfileForm(self.library.available_states())
-        scroll = QScrollArea()
-        scroll.setWidget(self.form)
-        scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(400)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        # Right: options, chart, table
-        right = QWidget()
-        rlay = QVBoxLayout(right)
-        rlay.addWidget(self._build_options())
+        # Center: chart and data table
         self.tabs = QTabWidget()
         self.figure = Figure(figsize=(9, 6), dpi=100)
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumSize(320, 240)
         self.canvas.setAccessibleName("Marginal tax rate chart")
         self.canvas.setAccessibleDescription("The Data table tab lists the same information as text.")
         self.tabs.addTab(self.canvas, "&Chart")
@@ -234,21 +226,35 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAccessibleName("Marginal rate data table")
         self.tabs.addTab(self.table, "&Data table")
-        rlay.addWidget(self.tabs, 1)
 
-        # Top level: the marginal graph, and the forward-looking plan
+        # Side panels: inputs on the left, graph options on the right. Each
+        # can be pinned beside the graph or pop open over it.
+        self.form = ProfileForm(self.library.available_states())
+        self.inputs_panel = SidePanel("Inputs", self.form, Qt.Edge.LeftEdge)
+        self.options_panel = SidePanel("Graph options", self._build_options(), Qt.Edge.RightEdge)
+        # Center pages: the marginal graph, and the forward-looking plan
         self.plan_path: Path | None = None
         self.plan_view = PlanView(self.library)
         self.plan_view.status.connect(lambda msg: self.statusBar().showMessage(msg))
         self.pages = QTabWidget()
-        self.pages.addTab(right, "&Marginal graph")
+        self.pages.addTab(self.tabs, "&Marginal graph")
         self.pages.addTab(self.plan_view, "&Forward plan")
-
-        splitter = QSplitter()
-        splitter.addWidget(scroll)
-        splitter.addWidget(self.pages)
-        splitter.setStretchFactor(1, 1)
-        self.setCentralWidget(splitter)
+        workspace = QWidget()
+        self.panels = PanelHost(workspace, self.pages)
+        self.setCentralWidget(workspace)
+        self.settings = QSettings(str(config_dir() / "window.ini"), QSettings.Format.IniFormat)
+        wide = self._screen_width() >= 1300
+        for panel, key, default_pinned in (
+            (self.inputs_panel, "inputs", True),
+            (self.options_panel, "options", wide),
+        ):
+            pinned = self._setting_bool(f"panels/{key}_pinned", default_pinned)
+            open_ = self._setting_bool(f"panels/{key}_open", pinned)
+            panel.saved_width = int(self.settings.value(f"panels/{key}_width", 0) or 0)
+            self.panels.add(panel, pinned, open_)
+        self.panels.visibility_changed.connect(self._panel_state_changed)
+        self.panels.pinned_changed.connect(self._panel_state_changed)
+        self._build_toolbar()
         self._build_menus()
 
         self._timer = QTimer(self, singleShot=True, interval=200)
@@ -273,9 +279,11 @@ class MainWindow(QMainWindow):
         )
 
     def _build_options(self) -> QWidget:
-        box = QGroupBox("Graph options")
-        lay = QHBoxLayout(box)
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(6, 6, 6, 6)
         left = QFormLayout()
+        left.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         self.source = QComboBox()
         for s in IncomeSource:
             self.source.addItem(s.label[0].upper() + s.label[1:], s.value)
@@ -292,7 +300,7 @@ class MainWindow(QMainWindow):
         xlabel.setBuddy(self.x_max)
         left.addRow(xlabel, self.x_max)
         self.irmaa_basis = QComboBox()
-        self.irmaa_basis.addItem("Brackets for premiums 2 years out (projected)", "premium_year")
+        self.irmaa_basis.addItem("Premiums 2 years out (projected)", "premium_year")
         self.irmaa_basis.addItem("This year's published brackets", "current_year")
         self.irmaa_basis.setAccessibleName("IRMAA brackets to show")
         self.irmaa_basis.setToolTip(
@@ -302,9 +310,14 @@ class MainWindow(QMainWindow):
         ilabel = QLabel("&IRMAA brackets")
         ilabel.setBuddy(self.irmaa_basis)
         left.addRow(ilabel, self.irmaa_basis)
+        for combo in (self.source, self.irmaa_basis):
+            # Size to a short width and let the popup list show full items.
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(20)
         lay.addLayout(left)
 
-        grid = QGridLayout()
+        layers = QGroupBox("Layers and lines")
+        grid = QVBoxLayout(layers)
         self.checks: dict[str, QCheckBox] = {}
         names = {k: k for k in LAYERS}
         names.update(
@@ -317,21 +330,96 @@ class MainWindow(QMainWindow):
             state_cg="State CG & QD tax",
         )
         names.update(ANNOTATION_LABELS)
-        for i, key in enumerate([*LAYERS, *ANNOTATIONS]):
+        for key in [*LAYERS, *ANNOTATIONS]:
             cb = QCheckBox(names[key])
             cb.clicked.connect(lambda checked, k=key: self._user_toggled(k, checked))
             self.checks[key] = cb
-            grid.addWidget(cb, i // 3, i % 3)
+            grid.addWidget(cb)
         reset = QPushButton("&Reset to suggested")
         reset.setToolTip("Go back to the layers suggested by the profile")
         reset.clicked.connect(self._reset_visibility)
-        grid.addWidget(reset, 3, 0)
-        lay.addLayout(grid, 1)
+        grid.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(layers)
+        lay.addStretch(1)
 
         self.source.currentIndexChanged.connect(self._schedule)
         self.x_max.valueChanged.connect(self._schedule)
         self.irmaa_basis.currentIndexChanged.connect(self._schedule)
         return box
+
+    def _build_toolbar(self) -> None:
+        bar = QToolBar("Panels")
+        bar.setObjectName("PanelsToolbar")
+        bar.setMovable(False)
+        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.inputs_action = QAction("&Inputs", self, checkable=True, shortcut="Ctrl+1")
+        self.inputs_action.setToolTip("Show or hide the inputs panel (Ctrl+1)")
+        self.inputs_action.triggered.connect(lambda: self.panels.toggle(self.inputs_panel))
+        self.options_action = QAction("&Graph options", self, checkable=True, shortcut="Ctrl+2")
+        self.options_action.setToolTip("Show or hide the graph options panel (Ctrl+2)")
+        self.options_action.triggered.connect(lambda: self.panels.toggle(self.options_panel))
+        bar.addAction(self.inputs_action)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        bar.addWidget(spacer)
+        bar.addAction(self.options_action)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
+        self._sync_panel_actions()
+
+    def resize_to_screen(self) -> None:
+        """Restore the last size and position, or open at 1400 x 900
+        (smaller on a smaller screen), centered."""
+        geometry = self.settings.value("window/geometry")
+        if geometry is not None and self.restoreGeometry(geometry):
+            return
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(1400, 900)
+            return
+        avail = screen.availableGeometry()
+        w, h = min(1400, avail.width()), min(900, avail.height())
+        self.resize(w, h)
+        self.move(avail.x() + (avail.width() - w) // 2, avail.y() + (avail.height() - h) // 2)
+
+    def save_window_state(self) -> None:
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        for panel, key in ((self.inputs_panel, "inputs"), (self.options_panel, "options")):
+            if panel.saved_width:
+                self.settings.setValue(f"panels/{key}_width", panel.saved_width)
+        self.settings.sync()
+
+    def reset_layout(self) -> None:
+        """Forget saved window size, position and panel settings."""
+        self.settings.remove("window")
+        self.settings.remove("panels")
+        wide = self._screen_width() >= 1300
+        for panel, pinned in ((self.inputs_panel, True), (self.options_panel, wide)):
+            panel.saved_width = 0
+            self.panels.set_pinned(panel, pinned)
+            self.panels.set_open(panel, pinned)
+        self.showNormal()
+        self.resize_to_screen()
+
+    def _screen_width(self) -> int:
+        screen = QGuiApplication.primaryScreen()
+        return screen.availableGeometry().width() if screen else 1920
+
+    def _setting_bool(self, key: str, default: bool) -> bool:
+        value = self.settings.value(key, default)
+        return value in (True, "true", "1", 1) if not isinstance(value, bool) else value
+
+    def _sync_panel_actions(self) -> None:
+        if hasattr(self, "inputs_action"):
+            self.inputs_action.setChecked(self.panels.is_open(self.inputs_panel))
+            self.options_action.setChecked(self.panels.is_open(self.options_panel))
+
+    def _panel_state_changed(self, *_args) -> None:
+        self._sync_panel_actions()
+        for panel, key in ((self.inputs_panel, "inputs"), (self.options_panel, "options")):
+            pinned = self.panels.is_pinned(panel)
+            self.settings.setValue(f"panels/{key}_pinned", pinned)
+            # A floating panel always starts closed; a pinned one remembers.
+            self.settings.setValue(f"panels/{key}_open", self.panels.is_open(panel) and pinned)
 
     def _build_menus(self) -> None:
         m = self.menuBar().addMenu("&File")
@@ -359,6 +447,10 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, md=mode: self.set_theme_mode(md))
             group.addAction(act)
             v.addAction(act)
+        v.addSeparator()
+        v.addAction(self.inputs_action)
+        v.addAction(self.options_action)
+        v.addAction(QAction("&Reset Window Layout", self, triggered=self.reset_layout))
         v.addSeparator()
         v.addAction(QAction("Chart &Colors…", self, triggered=self.edit_colors))
 
@@ -513,6 +605,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt name)
         if self.maybe_save():
+            self.save_window_state()
             event.accept()
         else:
             event.ignore()
@@ -619,10 +712,13 @@ class MainWindow(QMainWindow):
 
     def about(self) -> None:
         years = ", ".join(str(y) for y in self.library.enacted_years)
-        QMessageBox.about(
-            self,
-            f"About {APP_NAME}",
+        box = QMessageBox(self)
+        box.setWindowTitle(f"About {APP_NAME}")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
             f"<b>{APP_NAME}</b> {__version__}<br>Free, open-source tax graphs.<br><br>"
             f"Tax law data files: {years} (later years are projected).<br>"
-            "This is a planning aid, not tax advice.",
+            "This is a planning aid, not tax advice."
         )
+        box.setIconPixmap(about_pixmap(64, self.devicePixelRatioF()))
+        box.exec()

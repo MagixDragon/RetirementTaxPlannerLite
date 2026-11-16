@@ -19,6 +19,7 @@ dev = ["pytest>=8"]
 [project.scripts]
 rtpl-chart = "rtpl.cli:main"
 rtpl-plan = "rtpl.plan_cli:main"
+rtpl-shortcut = "rtpl.app.shortcut:main"
 
 [project.gui-scripts]
 rtpl = "rtpl.app.__main__:main"
@@ -27,7 +28,7 @@ rtpl = "rtpl.app.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rtpl = ["data/**/*.toml"]
+rtpl = ["data/**/*.toml", "data/icons/*.png", "data/icons/*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RetirementTaxPlannerLite
+Comment=Marginal and forward-looking tax graphs
+Exec=RetirementTaxPlannerLite
+Icon=rtpl
+Terminal=false
+Categories=Office;Finance;
+StartupWMClass=rtpl

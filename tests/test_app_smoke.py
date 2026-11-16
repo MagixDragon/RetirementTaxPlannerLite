@@ -124,3 +124,73 @@ def test_forward_plan_page(window):
     view.todays.setChecked(True)
     window.new_plan()
     assert view.plan is not None and view.result is not None
+
+
+def test_window_fits_small_screens(window):
+    """With both panels pinned, only the panels and the chart set the width."""
+    for panel in (window.inputs_panel, window.options_panel):
+        window.panels.set_pinned(panel, True)
+        window.panels.set_open(panel, True)
+    # Pixel widths follow the font, which differs a lot between CI runners,
+    # so check the layout instead: nothing but the two panels and the
+    # chart's own minimum may set the window's minimum width (before, the
+    # graph options row above the chart forced about 1,440 px).
+    parts = (
+        window.inputs_panel.minimumWidth()
+        + window.options_panel.minimumWidth()
+        + window.tabs.minimumSizeHint().width()
+    )
+    assert window.minimumSizeHint().width() <= parts + 40
+
+
+def test_panels_pin_and_pop_open(window):
+    panels, inputs = window.panels, window.inputs_panel
+    window.resize(1024, 740)
+    window.show()
+    panels.set_pinned(inputs, False)
+    panels.set_open(inputs, False)
+    assert inputs.isHidden() and not window.inputs_action.isChecked()
+    window.inputs_action.trigger()  # pops open over the graph
+    assert inputs.isVisible() and inputs.parent() is window.centralWidget()
+    assert window.inputs_action.isChecked()
+    panels.close_floating()
+    assert inputs.isHidden()
+    inputs.auto_hide.click()  # turning Auto hide off pins it beside the graph
+    assert inputs.parent() is panels.splitter
+    assert window.settings.value("panels/inputs_pinned") in (True, "true")
+
+
+def test_window_geometry_and_panel_width_restored(window):
+    from rtpl.app.main_window import MainWindow
+
+    window.resize(700, 500)  # the offscreen test screen is 800 x 600
+    wide = window.inputs_panel.minimumWidth() + 40
+    window.inputs_panel.saved_width = wide
+    window.save_window_state()
+    again = MainWindow()
+    try:
+        again.resize_to_screen()
+        assert (again.width(), again.height()) == (700, 500)
+        assert again.inputs_panel.preferred_width() == wide
+        again.reset_layout()
+        assert again.settings.value("window/geometry") is None
+    finally:
+        again.setWindowModified(False)
+        again.deleteLater()
+
+
+def test_auto_hide_check_box_shows_state(window):
+    panels, inputs = window.panels, window.inputs_panel
+    panels.set_pinned(inputs, True)
+    assert not inputs.auto_hide.isChecked() and inputs.auto_hide.text() == "Auto hide"
+    inputs.auto_hide.click()
+    assert not panels.is_pinned(inputs) and inputs.parent() is window.centralWidget()
+
+
+def test_forward_plan_page_does_not_widen_window(window):
+    from rtpl.model.plan import Plan
+
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    # The plan page's options scroll instead of setting a minimum width.
+    assert window.plan_view.minimumSizeHint().width() <= window.tabs.minimumSizeHint().width() + 40
