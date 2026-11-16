@@ -19,7 +19,7 @@ def main() -> int:
     window = MainWindow()
     window.effective_mode = apply_app_theme(app, "system")
     window.redraw()
-    window.resize(1400, 900)
+    window.resize_to_screen()
     window.show()
     return app.exec()
 
