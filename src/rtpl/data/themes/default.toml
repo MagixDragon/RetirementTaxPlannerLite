@@ -46,3 +46,53 @@ senior = "#c98500"
 niit = "#d55181"
 state = "#0ca30c"
 state_cg = "#9085e9"
+
+# Forward-looking graph: income categories, in stack order from the bottom.
+# Ordinary income takes the categorical slots in order; gains and the
+# tax-free segments also carry a hatch (set in the code) so no category is
+# told apart by color alone.
+[light.sources]
+ss = "#2a78d6"
+wages = "#eb6834"
+pension = "#1baf7a"
+other_ordinary = "#eda100"
+rmd = "#e87ba4"
+inherited = "#008300"
+ira_withdrawal = "#6250d6"
+roth_conversion = "#e34948"
+cg_qd = "#1c5cab"
+tax_exempt = "#c9c7c0"
+roth_withdrawal = "#aeaca5"
+principal = "#dddcd7"
+
+[light.lines]
+bracket_low = "#898781"
+bracket_high = "#0b0b0b"
+deduction = "#898781"
+cg0 = "#1c5cab"
+irmaa = "#a3337b"
+aca = "#e34948"
+spending = "#0b0b0b"
+
+[dark.sources]
+ss = "#3987e5"
+wages = "#d95926"
+pension = "#199e70"
+other_ordinary = "#c98500"
+rmd = "#d55181"
+inherited = "#0ca30c"
+ira_withdrawal = "#9085e9"
+roth_conversion = "#e66767"
+cg_qd = "#256abf"
+tax_exempt = "#5c5b56"
+roth_withdrawal = "#75746e"
+principal = "#45443f"
+
+[dark.lines]
+bracket_low = "#898781"
+bracket_high = "#f0efec"
+deduction = "#898781"
+cg0 = "#5598e7"
+irmaa = "#e87ba4"
+aca = "#e66767"
+spending = "#f0efec"

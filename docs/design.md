@@ -1,7 +1,8 @@
 # RetirementTaxPlannerLite design
 
-Status: first slice (marginal tax graph). The forward-looking plan is
-designed for here but not built yet.
+Status: the marginal tax graph, and a first version of the forward-looking
+plan (engine, graphs, command line and an app page that opens plan files;
+an in-app editor for accounts and rules comes next).
 
 ## Goals
 
@@ -32,12 +33,19 @@ src/rtpl/
   taxlaw/loader.py        FederalLaw, StateLaw, TaxLawLibrary (TOML + projection)
   engine/tax.py           compute_tax(): one year, one household
   engine/marginal.py      build_marginal_series(), annotations, default visibility
+  model/plan.py           Plan: accounts, income streams, Social Security, rules (JSON)
+  engine/forward.py       PlanEngine: the year-by-year loop, threshold lines, year table
+  engine/rmd.py           RMD tables (Uniform, Joint and Last Survivor, Single Life)
+  engine/social_security.py  own, spousal and survivor benefit rules
   charts/marginal_chart.py  render_marginal() onto any matplotlib Figure
+  charts/forward_chart.py   render_income(), render_balances()
   theme.py                light/dark palettes from TOML
   app/                    Qt main window and profile form
-  cli.py                  headless chart export (rtpl-chart)
+  cli.py                  headless marginal chart export (rtpl-chart)
+  plan_cli.py             headless plan export: graphs and CSV (rtpl-plan)
   data/federal/*.toml     per-year federal law + projection rules
   data/states/*.toml      per-state law
+  data/rmd/tables.toml    IRS life expectancy tables
   data/themes/default.toml
 ```
 
@@ -54,8 +62,9 @@ the forward-looking plan and the command-line exporter.
    switches for *has a taxable brokerage account* and *buys ACA coverage*.
 2. **Tax law (data files).** One TOML file per federal tax year, and one per
    state. See below.
-3. **Plan assumptions (forward graph, not built yet).** Inflation, returns,
-   allocation, and an event list. See "Forward-looking plan" below.
+3. **The plan (forward graph).** Accounts, income streams, Social Security
+   claiming, life expectancy, assumptions and a short rule list. See
+   "Forward-looking plan" below.
 
 ## Tax law data
 
@@ -177,23 +186,155 @@ tax, self-employment tax, local income taxes, most state credits, and the
 state rules each state file lists under `notes` (income phase-outs of
 state exemptions, cliff-style pension exclusions, special capital gains
 rates), ACA premium tax credit dollar
-amounts (only the thresholds are drawn), widow(er) filing transitions.
+amounts (only the thresholds are drawn), the qualifying surviving spouse
+filing status (issue #2).
 
-## Forward-looking plan (next)
+## Forward-looking plan
 
-Proposed shape, to discuss before building:
+![Forward-looking graph for the example plan](images/forward-example.png)
 
-* **Assumptions:** inflation, return per asset class, allocation, SS COLA,
-  claiming ages, spending need.
-* **Accounts:** taxable, traditional, Roth, HSA, cash, with balances and cost
-  basis.
-* **An event list with defaults and overrides.** A short list of rules, each
-  with a year or age range, instead of a line per year. Examples:
-  * "Roth conversions from age 62 to 70, fill to the top of the 22% bracket"
-  * "Start Social Security at 70 (Person 1), 67 (Person 2)"
-  * "RMDs per the Uniform Lifetime table" (on by default)
-  * "Person 1 dies at 85" (switches to single filing after the survivor years)
-  * "Sell home in 2031, $250K gain"
-  Each rule has defaults; a year-specific override wins over a range rule.
-* The engine runs `compute_tax()` per year with the projected law for that
-  year, so policy switches and sunsets apply automatically.
+A plan is the baseline profile (people, filing status, state, inflation)
+plus accounts, income streams, Social Security choices, life expectancy,
+assumptions and a short rule list. It is saved as JSON; see
+`examples/plans/couple_conversions_inherited.json`. The app's **Forward
+plan** page opens plan files, and the profile on the left is the plan's
+baseline, so edits there flow into the plan. `rtpl-plan` draws the same
+graphs and writes the year table as CSV.
+
+### Design decisions
+
+* **Rules only, balances tracked.** Balances grow and drive RMDs and
+  "fill to a target" conversions, but money comes out of an account only
+  where an RMD or a rule says so. Spending-driven withdrawals (a spending
+  target with a withdrawal order) are a later step that fits this model.
+* **Ages** are the age reached by December 31. A timing is stored as one
+  person's age (or a calendar year if the user prefers) and can be shown as
+  the other person's age or the year.
+* **Accounts are individual.** Each spouse can hold several of each type;
+  the graph groups them by type, and *Show each source separately* splits
+  them out by account, person and income stream.
+
+### What goes in
+
+| Item | Fields |
+|---|---|
+| Account | id, type (traditional IRA, 401(k)/403(b), inherited IRA, Roth IRA, Roth 401(k), HSA, taxable brokerage, cash), owner, balance, optional return; taxable: cost basis and yields (interest, qualified and non-qualified dividends, capital gain distributions); traditional: spouse is sole beneficiary; inherited: year inherited, original owner's birth year, whether they had started RMDs, eligible designated beneficiary |
+| Income stream | wages, pension, foreign pension, annuity, interest, qualified dividends, long-term gain, other ordinary, tax-exempt; owner, yearly amount in the first year paid, start and end (age or year; one year for a one-off), growth (COLA or raises; pensions default to 0%), survivor %, federal taxable % |
+| Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI |
+| Person | death age (optional) |
+| Assumptions | inflation, Social Security COLA, default return, cash return, yearly spending (today's dollars), plan end age, MAGI for the two years before the plan (for IRMAA) |
+| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N), or the whole balance |
+
+**Overrides.** For each account and kind of rule, the rule with the
+narrowest span wins in a year (ties go to the later rule). So "fill to 22%,
+ages 63 to 70" plus "2031: convert $0" skips one year without splitting
+the range. A withdrawal rule's amount is the year's total from that
+account, so an RMD counts toward it; conversions come on top of RMDs.
+
+### The yearly loop
+
+1. Accounts of someone who died the year before pass to the survivor
+   (spousal rollover).
+2. **RMDs.** Traditional accounts from 73 (born 1951–59) or 75 (born
+   1960+), using the Uniform Lifetime table, or the Joint and Last
+   Survivor table when the spouse is the sole beneficiary and more than 10
+   years younger. Inherited IRAs: yearly RMDs from the Single Life table
+   (non-recalculating, from the year after death, using the longer of the
+   beneficiary's and the owner's remaining expectancy) when the owner had
+   started RMDs or the beneficiary is eligible to stretch, and the whole
+   balance in the 10-year deadline year.
+3. **Income.** Streams, taxable-account yields (reinvested) and cash
+   interest.
+4. **Social Security.** Own benefit with early-claiming reductions or
+   delayed credits; a spousal top-up (half the other's full benefit, less
+   one's own, reduced if started early) once both have filed, which makes
+   "claim my own at 62, switch to spousal when my spouse files" happen on
+   its own; deemed filing means "spousal first, own later" is not offered.
+   After a death, the survivor gets the larger of their own benefit and the
+   deceased's (at least 82.5% of the deceased's full benefit if they had
+   claimed). SSDI is paid at the full benefit.
+5. **Rules.** Fixed, spread and whole-balance rules first, then fill rules
+   in list order; each fill amount is solved by bisection on the whole
+   return.
+6. **Tax.** `compute_tax()` with that year's law (projected past the newest
+   data file), the year's filing status (joint through the year of death,
+   then single), and inflation-indexed adjustments and itemized deductions.
+7. **Cash flow.** Income minus spending, tax and IRMAA surcharges. A surplus
+   goes into the taxable account (or cash); a deficit is taken from cash,
+   then the taxable account, realizing gains in proportion to the basis,
+   which feeds back into the tax (iterated). Anything still short is
+   reported as a shortfall in the graph's notes and the year table.
+8. **IRMAA.** Premiums in year *Y* use MAGI from *Y − 2* (the plan's own
+   years, or the MAGI entered for the years before the plan) and that
+   year's filing status.
+9. **Balances** grow by their return.
+
+### The graphs
+
+**Income and brackets.** Bars are income by source, in this stack order:
+Social Security, wages, pensions and annuities (including foreign
+pensions), interest and other ordinary income, RMDs, inherited IRA
+withdrawals, other IRA withdrawals, Roth conversions, capital gains and
+qualified dividends, then tax-free money (tax-exempt interest, Roth and
+HSA withdrawals, brokerage and cash principal) in light hatched grays that
+can be switched off.
+
+Lines, each on or off: the top of each ordinary bracket, the top of the 0%
+capital gains band, IRMAA tiers, the ACA 400% line and the deductions line
+(where taxable income starts). **Lines are in the same dollars as the
+bars**: each is the total income at which that year's return would reach
+the threshold, found by adding or removing ordinary income and recomputing
+the return. That accounts for Social Security taxation, the standard and
+senior deductions and the year's filing status, so where a bar crosses a
+line is where the income really reaches it. Bracket tops are read against
+the top of the ordinary segments, because gains stack above ordinary
+income on the return; the other lines are read against the whole taxable
+bar. IRMAA lines use the tiers for the premium year two years later.
+
+Suggested lines: the brackets the bars reach plus the next one up (not
+10%), the 0% gains band if there are gains, IRMAA tiers the bars come
+near if anyone will be on Medicare, and ACA if the household buys
+marketplace coverage.
+
+**Balances.** Year-end balances by account type (or by account), colored
+to match the income each feeds. **Year table.** Every year's income by
+category, AGI, taxable income, MAGI, federal and state tax, IRMAA, total
+balances and notes, for screen readers and copying.
+
+A *today's dollars* switch divides every amount by inflation since the
+first year.
+
+### Data sources and checks
+
+* `data/rmd/tables.toml` holds the Uniform Lifetime and Single Life tables
+  (IRS Publication 590-B, 2022 and later). The Joint and Last Survivor
+  table is derived from the Single Life table's mortality; that
+  reproduces every Uniform Lifetime entry (a 10-year age gap) to within
+  0.1 year. A user copy can add the published joint table.
+* Social Security factors follow SSA's published reduction and credit
+  rules (5/9% and 5/12% a month early, 2/3% a month delayed; spousal
+  25/36% and 5/12%).
+
+### Simplifications in this version
+
+* No birth month: a benefit claimed at age *A* starts in January of the
+  year the person reaches *A* (a claim at *A* years and *M* months pays
+  12 − *M* months that year).
+* No Social Security earnings test; no early-survivor reduction; a survivor
+  steps up the year after the death.
+* Spousal and survivor benefits assume the couple stays married to each
+  other; divorced-spouse benefits are not modelled.
+* State taxes treat foreign pensions as other ordinary income (no state
+  pension exclusion), and use the same taxable share as the federal return.
+* An inherited IRA left by a spouse who dies during the plan is rolled over
+  into the survivor's own account. Inherited Roth IRAs are not modelled.
+* Withdrawals from Roth accounts and HSAs are treated as qualified (tax-free).
+* Returns are a flat rate per account; no Monte Carlo trials yet.
+
+### Next steps
+
+* An in-app editor for accounts, income streams, Social Security and rules.
+* A spending tab: a spending target line on the income graph, and
+  optionally withdrawals that follow a spending need and an account order.
+* A tax-dollars view (tax paid per year by layer).
+* Qualifying surviving spouse filing (issue #2).

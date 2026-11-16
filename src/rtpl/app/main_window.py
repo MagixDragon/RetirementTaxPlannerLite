@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from rtpl import __version__
+from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.charts.marginal_chart import render_marginal
 from rtpl.engine.marginal import (
@@ -45,6 +46,7 @@ from rtpl.engine.marginal import (
     default_visibility,
 )
 from rtpl.engine.tax import IncomeSource
+from rtpl.model.plan import Plan
 from rtpl.model.profile import Person, Profile
 from rtpl.taxlaw.loader import TaxLawLibrary
 from rtpl.theme import Theme
@@ -234,9 +236,17 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.table, "&Data table")
         rlay.addWidget(self.tabs, 1)
 
+        # Top level: the marginal graph, and the forward-looking plan
+        self.plan_path: Path | None = None
+        self.plan_view = PlanView(self.library)
+        self.plan_view.status.connect(lambda msg: self.statusBar().showMessage(msg))
+        self.pages = QTabWidget()
+        self.pages.addTab(right, "&Marginal graph")
+        self.pages.addTab(self.plan_view, "&Forward plan")
+
         splitter = QSplitter()
         splitter.addWidget(scroll)
-        splitter.addWidget(right)
+        splitter.addWidget(self.pages)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
         self._build_menus()
@@ -334,6 +344,10 @@ class MainWindow(QMainWindow):
             act = QAction(text, self, shortcut=key, triggered=slot)
             m.addAction(act)
         m.addSeparator()
+        m.addAction(QAction("New Plan from &Profile", self, triggered=self.new_plan))
+        m.addAction(QAction("Open P&lan…", self, shortcut="Ctrl+Shift+O", triggered=self.open_plan))
+        m.addAction(QAction("Save Pla&n As…", self, shortcut="Ctrl+Alt+S", triggered=self.save_plan_as))
+        m.addSeparator()
         m.addAction(QAction("&Export Chart…", self, shortcut="Ctrl+E", triggered=self.export_chart))
         m.addSeparator()
         m.addAction(QAction("E&xit", self, shortcut=QKeySequence.StandardKey.Quit, triggered=self.close))
@@ -405,6 +419,8 @@ class MainWindow(QMainWindow):
             if st else "Choose a state in the profile to add this layer."
         )
         self.redraw()
+        if self.plan_view.plan is not None:
+            self.plan_view.recompute(profile)
         b = self.series.baseline
         self.statusBar().showMessage(
             f"Baseline: AGI ${b.agi:,.0f}, taxable income ${b.taxable_income:,.0f}, "
@@ -421,6 +437,7 @@ class MainWindow(QMainWindow):
             cb.blockSignals(False)
         render_marginal(self.figure, self.series, vis, self.theme.palette(self.effective_mode))
         self.canvas.draw_idle()
+        self.plan_view.set_palette(self.theme.palette(self.effective_mode))
         self._fill_table(vis)
 
     def _fill_table(self, vis: dict[str, bool]) -> None:
@@ -502,6 +519,7 @@ class MainWindow(QMainWindow):
 
     def new_profile(self) -> None:
         if self.maybe_save():
+            self.plan_view.set_plan(None)
             self._load_profile(self._starter_profile(), None)
 
     def open_profile(self) -> None:
@@ -515,6 +533,7 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Open Profile", f"Could not open the profile:\n{exc}")
             return
+        self.plan_view.set_plan(None)
         self._load_profile(profile, Path(path))
 
     def save_profile(self) -> bool:
@@ -543,12 +562,59 @@ class MainWindow(QMainWindow):
         self.current_path = Path(path)
         return self.save_profile()
 
+    # -- plans -----------------------------------------------------------
+    def load_plan(self, plan: Plan, path: Path | None) -> None:
+        """Show a plan; its profile becomes the profile on the left."""
+        self.plan_path = path
+        self.plan_view.set_plan(plan)
+        self._load_profile(plan.profile, None)
+        self.pages.setCurrentWidget(self.plan_view)
+        self.recompute()
+
+    def new_plan(self) -> None:
+        self.load_plan(Plan.from_profile(self.form.profile()), None)
+        self.statusBar().showMessage(
+            "New plan from the profile: wages, pensions and Social Security carry forward. "
+            "Add accounts and rules in the plan file for now.", 8000)
+
+    def open_plan(self) -> None:
+        if not self.maybe_save():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Open Plan", "", "Plans (*.json)")
+        if not path:
+            return
+        try:
+            plan = Plan.load(path)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            QMessageBox.warning(self, "Open Plan", f"Could not open the plan:\n{exc}")
+            return
+        self.load_plan(plan, Path(path))
+
+    def save_plan_as(self) -> None:
+        plan = self.plan_view.plan
+        if plan is None:
+            QMessageBox.information(self, "Save Plan", "There is no plan to save yet.")
+            return
+        start = str(self.plan_path) if self.plan_path else self._suggested_path(".plan.json")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Plan", start, "Plans (*.json)")
+        if not path:
+            return
+        plan.profile = self.form.profile()
+        try:
+            plan.save(path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save Plan", f"Could not save the plan:\n{exc}")
+            return
+        self.plan_path = Path(path)
+        self.statusBar().showMessage(f"Saved {path}", 4000)
+
     def export_chart(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Chart", self._suggested_path(".png"), "PNG image (*.png);;SVG image (*.svg);;PDF (*.pdf)"
         )
         if path:
-            self.figure.savefig(path, dpi=200, facecolor=self.figure.get_facecolor())
+            fig = self.plan_view.current_figure() if self.pages.currentWidget() is self.plan_view else self.figure
+            fig.savefig(path, dpi=200, facecolor=fig.get_facecolor())
             self.statusBar().showMessage(f"Exported {path}", 4000)
 
     def about(self) -> None:

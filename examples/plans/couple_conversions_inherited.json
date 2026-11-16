@@ -1,0 +1,191 @@
+{
+  "profile": {
+    "name": "Couple with conversions and an inherited IRA",
+    "year": 2026,
+    "filing_status": "mfj",
+    "state": "NC",
+    "inflation": 0.025,
+    "people": [
+      {
+        "name": "Alex",
+        "birth_year": 1964
+      },
+      {
+        "name": "Sam",
+        "birth_year": 1966
+      }
+    ],
+    "household": {
+      "has_taxable_brokerage": true
+    }
+  },
+  "people": [
+    {
+      "social_security": {
+        "fra_benefit": 38000,
+        "claim_age": 70
+      },
+      "death_age": 88
+    },
+    {
+      "social_security": {
+        "fra_benefit": 16000,
+        "claim_age": 62
+      },
+      "death_age": 94
+    }
+  ],
+  "accounts": [
+    {
+      "id": "alex_ira",
+      "kind": "traditional_ira",
+      "owner": 0,
+      "balance": 1100000
+    },
+    {
+      "id": "sam_401k",
+      "kind": "401k",
+      "owner": 1,
+      "balance": 350000
+    },
+    {
+      "id": "alex_inh",
+      "kind": "inherited_ira",
+      "owner": 0,
+      "balance": 400000,
+      "inherited_year": 2024,
+      "original_owner_birth_year": 1938,
+      "owner_started_rmds": true
+    },
+    {
+      "id": "alex_roth",
+      "kind": "roth_ira",
+      "owner": 0,
+      "balance": 90000
+    },
+    {
+      "id": "brokerage",
+      "kind": "taxable",
+      "owner": null,
+      "balance": 600000,
+      "cost_basis": 380000,
+      "qualified_dividend_yield": 0.015,
+      "interest_yield": 0.002,
+      "cap_gain_distribution_yield": 0.003
+    },
+    {
+      "id": "savings",
+      "kind": "cash",
+      "owner": null,
+      "balance": 60000
+    }
+  ],
+  "incomes": [
+    {
+      "kind": "wages",
+      "amount": 95000,
+      "owner": 1,
+      "end": {
+        "age": 60,
+        "person": 1
+      },
+      "growth": 0.03
+    },
+    {
+      "kind": "pension",
+      "amount": 18000,
+      "owner": 0,
+      "start": {
+        "age": 65,
+        "person": 0
+      },
+      "survivor_pct": 0.5
+    },
+    {
+      "kind": "foreign_pension",
+      "name": "Alex UK State Pension",
+      "amount": 9000,
+      "owner": 0,
+      "start": {
+        "age": 67,
+        "person": 0
+      },
+      "growth": 0.025
+    },
+    {
+      "kind": "ltcg",
+      "name": "Sell rental property",
+      "amount": 150000,
+      "owner": null,
+      "start": {
+        "year": 2031
+      },
+      "end": {
+        "year": 2031
+      }
+    }
+  ],
+  "rules": [
+    {
+      "kind": "withdrawal",
+      "account": "alex_inh",
+      "start": {
+        "year": 2027
+      },
+      "end": {
+        "year": 2034
+      },
+      "mode": "spread",
+      "note": "Even 1/N over the remaining years of the 10-year window"
+    },
+    {
+      "kind": "roth_conversion",
+      "account": "alex_ira",
+      "start": {
+        "age": 63,
+        "person": 0
+      },
+      "end": {
+        "age": 70,
+        "person": 0
+      },
+      "mode": "fill",
+      "target": "bracket:0.22"
+    },
+    {
+      "kind": "roth_conversion",
+      "account": "alex_ira",
+      "start": {
+        "year": 2031
+      },
+      "mode": "fixed",
+      "amount": 0,
+      "note": "Skip the year of the property sale"
+    },
+    {
+      "kind": "withdrawal",
+      "account": "alex_roth",
+      "start": {
+        "age": 84,
+        "person": 0
+      },
+      "end": {
+        "age": 100,
+        "person": 0
+      },
+      "mode": "fixed",
+      "amount": 90000,
+      "note": "Tap the Roth once the brokerage account runs low"
+    }
+  ],
+  "assumptions": {
+    "return_rate": 0.05,
+    "cash_return": 0.03,
+    "spending": 110000,
+    "end_age": 95,
+    "prior_magi": {
+      "2024": 150000,
+      "2025": 160000
+    }
+  }
+}

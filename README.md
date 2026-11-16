@@ -1,8 +1,8 @@
 # RetirementTaxPlannerLite
 
 Free, open-source, cross-platform desktop app for **marginal tax graphs**
-(and soon **forward-looking tax projections**) of the kind retirement
-planners show their clients.
+and **forward-looking tax projections** of the kind retirement planners
+show their clients.
 
 ![Marginal tax graph for a retired couple in California](docs/images/marginal-example.png)
 
@@ -11,6 +11,16 @@ split into layers: ordinary brackets, the Social Security taxation
 "tax torpedo", the enhanced senior deduction phase-out, capital gains and
 qualified dividends, NIIT and an optional state layer, with IRMAA and ACA
 cliff lines on top.
+
+The forward-looking graph shows each year's income by source (Social
+Security, pensions, RMDs, inherited IRA withdrawals, Roth conversions,
+gains, tax-free withdrawals) against the top of each tax bracket, IRMAA
+tiers and the ACA cliff, with account balances on a second tab. A plan
+is a profile plus accounts, income streams, Social Security claiming ages
+and a short list of rules such as "convert to the top of the 22% bracket
+from 63 to 70".
+
+![Forward-looking graph for an example plan](docs/images/forward-example.png)
 
 > This is a planning aid, not tax advice. Check the numbers in the tax-law
 > files against official sources before relying on them.
@@ -24,6 +34,7 @@ uv sync --extra dev              # creates .venv and installs the app plus pytes
 uv run rtpl                      # opens the desktop app
 uv run pytest                    # runs the tests
 uv run rtpl-chart examples/profiles/retired_couple_ca.json -o chart.png
+uv run rtpl-plan examples/plans/couple_conversions_inherited.json -o income.png --balances balances.png
 ```
 
 With plain pip (`.` means "this folder's pyproject.toml", `-e` makes it
@@ -57,6 +68,22 @@ Run the tests with `pytest`.
 * A data table that lists every rate change and threshold, for screen
   readers and for copying.
 * Export to PNG, SVG or PDF.
+
+## Forward-looking plans
+
+In the app, use **File > Open Plan** (try
+`examples/plans/couple_conversions_inherited.json`) or **File > New Plan
+from Profile**, then the **Forward plan** tab. For now, accounts, income
+streams and rules are edited in the plan's JSON file; an in-app editor is
+next. From the command line:
+
+```bash
+rtpl-plan plan.json -o income.png --balances balances.png --csv years.csv
+rtpl-plan plan.json -o income.svg --detail --todays-dollars --line bracket:0.32
+```
+
+See "Forward-looking plan" in [docs/design.md](docs/design.md) for every
+field, the yearly steps and the simplifications.
 
 ## Tax law files
 

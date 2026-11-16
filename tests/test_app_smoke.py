@@ -106,3 +106,21 @@ def test_inflation_and_irmaa_basis_controls(window):
     window.recompute()
     irmaa = [a for a in window.series.annotations if a.kind == "irmaa"]
     assert irmaa and "published thresholds" in irmaa[0].detail
+
+
+def test_forward_plan_page(window):
+    from rtpl.model.plan import Plan
+
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    view = window.plan_view
+    assert view.result is not None and view.result.years
+    assert window.form.profile().state == "NC"
+    assert view.table.rowCount() == len(view.result.years)
+    assert view.line_checks["bracket:0.22"].isChecked()
+    view.line_checks["bracket:0.22"].click()  # user hides the 22% line
+    assert view.visibility()["bracket:0.22"] is False
+    view.detail.setChecked(True)
+    view.todays.setChecked(True)
+    window.new_plan()
+    assert view.plan is not None and view.result is not None
