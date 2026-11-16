@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 
 class SidePanel(QFrame):
-    """A titled panel with a pin button and a scrolling body."""
+    """A titled panel with an Auto hide check box and a scrolling body."""
 
     pin_toggled = Signal(bool)
     close_requested = Signal()
@@ -44,11 +44,11 @@ class SidePanel(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(8, 4, 4, 0)
         self.title = QLabel(f"<b>{title.replace('&', '')}</b>")
-        # A check box shows the state itself (checked = pinned), so there is
-        # no "does the label say what it is or what it will do?" question.
-        self.pin = QCheckBox("Pinned")
-        self.pin.setAccessibleName(f"Pin {title.replace('&', '')} beside the graph")
-        self.pin.toggled.connect(self._pin_changed)
+        # Checked: the panel pops open over the graph and hides again when it
+        # loses focus. Unchecked: it is pinned open beside the graph.
+        self.auto_hide = QCheckBox("Auto hide")
+        self.auto_hide.setAccessibleName(f"Auto hide {title.replace('&', '')}")
+        self.auto_hide.toggled.connect(lambda checked: self._pin_changed(not checked))
         self.saved_width = 0  # width the user dragged a pinned panel to
         self.close_btn = QToolButton()
         self.close_btn.setAutoRaise(True)
@@ -57,7 +57,7 @@ class SidePanel(QFrame):
         self.close_btn.setAccessibleName(f"Hide {title.replace('&', '')}")
         self.close_btn.clicked.connect(self.close_requested)
         head.addWidget(self.title, 1)
-        head.addWidget(self.pin)
+        head.addWidget(self.auto_hide)
         head.addSpacing(4)
         head.addWidget(self.close_btn)
 
@@ -86,13 +86,17 @@ class SidePanel(QFrame):
     def preferred_width(self) -> int:
         return max(self.minimumWidth(), self.saved_width)
 
+    def is_pinned(self) -> bool:
+        """Pinned means open beside the graph: Auto hide is off."""
+        return not self.auto_hide.isChecked()
+
     def _pin_changed(self, pinned: bool) -> None:
-        self.pin.setToolTip(
-            "Pinned: the panel stays open beside the graph. Uncheck to have it "
-            "pop open over the graph only when you need it."
-            if pinned
-            else "Not pinned: the panel pops open over the graph and closes when you "
-            "click the graph or press Esc. Check to keep it open beside the graph."
+        self.auto_hide.setToolTip(
+            "Auto hide is on: the panel opens over the graph and hides again when you "
+            "click the graph or press Esc. Uncheck to keep it open beside the graph."
+            if not pinned
+            else "Auto hide is off: the panel stays open beside the graph. Check to have "
+            "it open over the graph only when you need it."
         )
         # Floating panels get a highlight border so they never look pinned.
         self.setProperty("floating", not pinned)
@@ -103,7 +107,7 @@ class SidePanel(QFrame):
         self.pin_toggled.emit(pinned)
 
     def _escape(self) -> None:
-        if not self.pin.isChecked():
+        if not self.is_pinned():
             self.close_requested.emit()
 
 
@@ -139,24 +143,24 @@ class PanelHost(QObject):
     def add(self, panel: SidePanel, pinned: bool, open_: bool) -> None:
         self.panels.append(panel)
         self._open[id(panel)] = open_
-        panel.pin.blockSignals(True)
-        panel.pin.setChecked(pinned)
-        panel.pin.blockSignals(False)
+        panel.auto_hide.blockSignals(True)
+        panel.auto_hide.setChecked(not pinned)
+        panel.auto_hide.blockSignals(False)
         panel._pin_changed(pinned)
         panel.pin_toggled.connect(lambda p, pn=panel: self.set_pinned(pn, p))
         panel.close_requested.connect(lambda pn=panel: self.set_open(pn, False))
         self._place(panel)
 
     def is_pinned(self, panel: SidePanel) -> bool:
-        return panel.pin.isChecked()
+        return panel.is_pinned()
 
     def is_open(self, panel: SidePanel) -> bool:
         return self._open[id(panel)]
 
     # -- state changes -------------------------------------------------
     def set_pinned(self, panel: SidePanel, pinned: bool) -> None:
-        if panel.pin.isChecked() != pinned:
-            panel.pin.setChecked(pinned)  # re-enters through pin_toggled
+        if panel.is_pinned() != pinned:
+            panel.auto_hide.setChecked(not pinned)  # re-enters through pin_toggled
             return
         if pinned and not self._open[id(panel)]:
             self._open[id(panel)] = True  # pinning a panel always shows it

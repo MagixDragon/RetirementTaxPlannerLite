@@ -128,7 +128,7 @@ def test_panels_pin_and_pop_open(window):
     assert window.inputs_action.isChecked()
     panels.close_floating()
     assert inputs.isHidden()
-    inputs.pin.click()  # pinning puts it beside the graph
+    inputs.auto_hide.click()  # turning Auto hide off pins it beside the graph
     assert inputs.parent() is panels.splitter
     assert window.settings.value("panels/inputs_pinned") in (True, "true")
 
@@ -151,9 +151,9 @@ def test_window_geometry_and_panel_width_restored(window):
         again.deleteLater()
 
 
-def test_pin_check_box_shows_state(window):
+def test_auto_hide_check_box_shows_state(window):
     panels, inputs = window.panels, window.inputs_panel
     panels.set_pinned(inputs, True)
-    assert inputs.pin.isChecked() and inputs.pin.text() == "Pinned"
-    panels.set_pinned(inputs, False)
-    assert not inputs.pin.isChecked() and inputs.parent() is window.centralWidget()
+    assert not inputs.auto_hide.isChecked() and inputs.auto_hide.text() == "Auto hide"
+    inputs.auto_hide.click()
+    assert not panels.is_pinned(inputs) and inputs.parent() is window.centralWidget()
