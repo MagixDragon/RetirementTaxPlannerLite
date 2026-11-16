@@ -45,6 +45,10 @@ rtpl-chart examples/profiles/retired_couple_ca.json -o chart.svg --source ltcg -
 
 Run the tests with `pytest`.
 
+For a desktop or Start-menu shortcut with the app icon, run
+`uv run rtpl-shortcut`. To build a stand-alone app for Windows, macOS or
+Linux, see [docs/packaging.md](docs/packaging.md).
+
 ## What's in the box
 
 * Profile editor: tax year, filing status, state, one or two people
