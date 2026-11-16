@@ -206,15 +206,42 @@ class PlanEngine:
         p = self.profile.people[i]
         ss = self.plan.people[i].social_security
         cola = (1 + self.plan.ss_cola) ** (year - self.plan.start_year)
+        if ss.ssdi:
+            amount = self._ssdi_year(p.birth_year, ss, year) * cola
+            return amount, (1.0 if amount > 0 else 0.0)
         if ss.current_benefit is not None:
             return ss.current_benefit * cola, 1.0
-        if ss.ssdi:
-            return ss.fra_benefit * cola, 1.0
         if ss.fra_benefit <= 0:
             # No benefit of their own, but filing still starts any spousal benefit.
             return 0.0, ssa.claim_year_fraction(year, p.birth_year, ss.claim_age)
         factor = ssa.own_benefit_factor(p.birth_year, ss.claim_age)
         return ss.fra_benefit * factor * cola, ssa.claim_year_fraction(year, p.birth_year, ss.claim_age)
+
+    @staticmethod
+    def _ssdi_year(birth_year: int, ss, year: int) -> float:
+        """Benefit paid in ``year`` (today's dollars) for someone on SSDI.
+
+        SSDI pays the full benefit and becomes a retirement benefit at full
+        retirement age. With a claiming age past FRA the benefit is
+        suspended from FRA and restarts at that age with delayed credits.
+        If SSDI ends early (a return to work), nothing is paid until the
+        claiming age, which then works as an ordinary claim.
+        """
+        pia = ss.fra_benefit or (ss.current_benefit or 0.0)
+        fra = ssa.full_retirement_age(birth_year)
+        end = ss.ssdi_end_age if ss.ssdi_end_age is not None and ss.ssdi_end_age < fra else fra
+        # Share of the year on SSDI: whole years before ``end``, then the months before it.
+        on_ssdi = min(1.0, max(0.0, end - (year - birth_year)))
+        paid = pia * on_ssdi
+        if end < fra:
+            claim = max(ss.claim_age, end)
+            paid += pia * ssa.own_benefit_factor(birth_year, claim) * ssa.claim_year_fraction(year, birth_year, claim)
+        elif ss.claim_age > fra:
+            factor = ssa.own_benefit_factor(birth_year, ss.claim_age)
+            paid += pia * factor * ssa.claim_year_fraction(year, birth_year, ss.claim_age)
+        else:
+            paid += pia * (1.0 - on_ssdi) * (1.0 if year - birth_year >= int(fra) else 0.0)
+        return paid
 
     def _ss_claim_year(self, i: int) -> int:
         p = self.profile.people[i]

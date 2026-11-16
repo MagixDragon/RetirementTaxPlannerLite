@@ -220,7 +220,7 @@ graphs and writes the year table as CSV.
 |---|---|
 | Account | id, type (traditional IRA, 401(k)/403(b), inherited IRA, Roth IRA, Roth 401(k), HSA, taxable brokerage, cash), owner, balance, optional return; taxable: cost basis and yields (interest, qualified and non-qualified dividends, capital gain distributions); traditional: spouse is sole beneficiary; inherited: year inherited, original owner's birth year, whether they had started RMDs, eligible designated beneficiary |
 | Income stream | wages, pension, foreign pension, annuity, interest, qualified dividends, long-term gain, other ordinary, tax-exempt; owner, yearly amount in the first year paid, start and end (age or year; one year for a one-off), growth (COLA or raises; pensions default to 0%), survivor %, federal taxable % |
-| Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI |
+| Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI, with an optional early end age (a claiming age past FRA suspends SSDI's retirement benefit until then) |
 | Person | death age (optional) |
 | Assumptions | inflation, Social Security COLA, default return, cash return, yearly spending (today's dollars), plan end age, MAGI for the two years before the plan (for IRMAA) |
 | Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N), or the whole balance |
@@ -252,7 +252,13 @@ account, so an RMD counts toward it; conversions come on top of RMDs.
    its own; deemed filing means "spousal first, own later" is not offered.
    After a death, the survivor gets the larger of their own benefit and the
    deceased's (at least 82.5% of the deceased's full benefit if they had
-   claimed). SSDI is paid at the full benefit.
+   claimed). SSDI is paid at the full benefit and becomes a retirement
+   benefit at full retirement age. With a claiming age past FRA the benefit
+   is suspended from FRA and restarts then with delayed credits (so "SSDI
+   until FRA, then let it grow to 70" works). An optional SSDI end age
+   covers a return to work: nothing is paid until the claiming age, which
+   then works as an ordinary claim. While a benefit is suspended, the
+   spouse's spousal benefit on that record stops too.
 5. **Rules.** Fixed, spread and whole-balance rules first, then fill rules
    in list order; each fill amount is solved by bisection on the whole
    return.
@@ -320,6 +326,8 @@ first year.
 * No birth month: a benefit claimed at age *A* starts in January of the
   year the person reaches *A* (a claim at *A* years and *M* months pays
   12 − *M* months that year).
+* After SSDI ends early, a later early claim takes the full early-claiming
+  reduction (the credit for months already on SSDI is not applied).
 * No Social Security earnings test; no early-survivor reduction; a survivor
   steps up the year after the death.
 * Spousal and survivor benefits assume the couple stays married to each

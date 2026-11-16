@@ -178,6 +178,11 @@ class SocialSecurity:
     claim_age: float = 67.0  # years, may include months as a fraction (67.5)
     current_benefit: float | None = None  # already claimed: the yearly amount being paid now
     ssdi: bool = False  # receiving disability; becomes a retirement benefit at FRA
+    # With SSDI: a claim_age above full retirement age suspends the benefit
+    # at FRA and restarts it at claim_age with delayed credits (8% a year).
+    # ssdi_end_age ends SSDI early (a return to work); the benefit then
+    # starts again at claim_age as an ordinary claim.
+    ssdi_end_age: float | None = None
 
 
 @dataclass

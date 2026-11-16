@@ -236,3 +236,25 @@ def test_from_profile_carries_income():
     plan = Plan.from_profile(prof)
     assert plan.people[0].social_security.current_benefit == 30_000
     assert [s.kind for s in plan.incomes] == ["pension"]
+
+
+def test_ssdi_suspend_at_fra_until_70(lib):
+    prof = single(birth=1966)
+    plan = Plan(profile=prof, people=[PersonPlan(social_security=SocialSecurity(
+        fra_benefit=30_000, claim_age=70, ssdi=True))], assumptions=Assumptions(ss_cola=0.0, end_age=72))
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[60] == pytest.approx(30_000) and ss[66] == pytest.approx(30_000)  # SSDI at the full benefit
+    assert ss[67] == 0 and ss[69] == 0  # suspended from full retirement age
+    assert ss[70] == pytest.approx(30_000 * 1.24)  # restarts with 36 months of delayed credits
+
+
+def test_ssdi_default_continues_and_early_end(lib):
+    prof = single(birth=1966)
+    plan = Plan(profile=prof, people=[PersonPlan(social_security=SocialSecurity(
+        fra_benefit=30_000, claim_age=67, ssdi=True))], assumptions=Assumptions(ss_cola=0.0, end_age=69))
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[66] == ss[67] == ss[68] == pytest.approx(30_000)
+    plan.people[0].social_security = SocialSecurity(fra_benefit=30_000, claim_age=62, ssdi=True, ssdi_end_age=61)
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[60] == pytest.approx(30_000) and ss[61] == 0
+    assert ss[62] == pytest.approx(21_000)  # ordinary early claim afterwards
