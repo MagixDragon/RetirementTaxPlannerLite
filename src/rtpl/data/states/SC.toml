@@ -1,0 +1,26 @@
+# South Carolina personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "SC"
+name = "South Carolina"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+capital_gains_exclusion = 0.44
+notes = [
+  "$15,000 deduction per person at 65+ (combined with the retirement deduction).",
+  "44% of net capital gains excluded.",
+]
+
+[brackets]
+single = [[0, 0], [3640, 0.03], [18230, 0.06]]
+mfj    = [[0, 0], [3640, 0.03], [18230, 0.06]]
+
+[standard_deduction]
+single = 8350
+mfj    = 16700
+
+[age_deduction]
+amount = 15000
+min_age = 65

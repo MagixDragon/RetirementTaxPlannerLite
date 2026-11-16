@@ -1,0 +1,23 @@
+# Oregon personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "OR"
+name = "Oregon"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Retirement income credit, federal tax subtraction and local taxes not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0475], [4550, 0.0675], [11400, 0.0875], [125000, 0.099]]
+mfj    = [[0, 0.0475], [9100, 0.0675], [22800, 0.0875], [250000, 0.099]]
+
+[standard_deduction]
+single = 2910
+mfj    = 5820
+
+[exemption]
+credit_per_person = 256

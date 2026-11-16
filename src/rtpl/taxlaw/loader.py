@@ -201,39 +201,114 @@ def _parse_federal(raw: dict) -> FederalLaw:
 
 
 @dataclass(frozen=True)
+class RetirementExclusion:
+    """Per-person exclusion of pension and/or IRA income from state tax."""
+
+    amount: float  # math.inf = unlimited
+    min_age: int = 0
+    applies_to: tuple[str, ...] = ("pension", "ira")
+
+
+@dataclass(frozen=True)
+class SocialSecurityRule:
+    """How a state that taxes Social Security exempts some of it."""
+
+    exempt_from_age: int | None = None  # benefits of people this age+ are exempt
+    exempt_if_agi_at_most: dict[str, float] | None = None
+    phaseout_width: dict[str, float] | None = None  # linear phase-out above the limit
+    exempt_fraction_above: float = 0.0  # share still exempt above the limit
+
+
+@dataclass(frozen=True)
 class StateLaw:
     code: str
     name: str
     year: int | None
     taxes_social_security: bool
-    capital_gains_as_ordinary: bool
-    exempt_retirement_income: bool
     brackets: dict[str, Schedule]
     standard_deduction: dict[str, float]
     exemption_per_person: float = 0.0
+    credit_per_person: float = 0.0  # personal exemption given as a credit
+    filer_credit: dict[str, float] | None = None  # flat nonrefundable credit by status
     surcharges: tuple[tuple[float, float], ...] = ()  # (rate, threshold)
     has_income_tax: bool = True
+    social_security: SocialSecurityRule = field(default_factory=SocialSecurityRule)
+    retirement_exclusions: tuple[RetirementExclusion, ...] = ()
+    age_deduction: tuple[float, int] | None = None  # (amount per person, min age)
+    capital_gains_exclusion: float = 0.0  # share of net long-term gains excluded
+    capital_gains_max_rate: float | None = None  # alternative cap on the rate for gains
+    gains_only_tax: Schedule | None = None  # e.g. Washington: tax on long-term gains only
+    gains_only_deduction: float = 0.0
+    notes: tuple[str, ...] = ()
+    sources: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
         return f"State Tax ({self.code})"
 
 
+def _status_table(table: dict | None, cast=float, default=0.0) -> dict[str, float]:
+    """Read a by-status table where hoh and mfs fall back to single."""
+    table = table or {}
+    out = {}
+    for k in FILING_STATUSES:
+        if k in table:
+            out[k] = cast(table[k])
+        elif "single" in table and k != "mfj":
+            out[k] = cast(table["single"])
+        else:
+            out[k] = cast(default)
+    return out
+
+
 def _parse_state(raw: dict) -> StateLaw:
     surcharges = tuple(
         (float(v["rate"]), float(v["threshold"])) for v in raw.get("surcharges", {}).values()
     )
+    br = raw.get("brackets", {"single": [[0, 0.0]], "mfj": [[0, 0.0]]})
+    brackets = {k: Schedule.from_pairs(br.get(k, br["single"] if k != "mfj" else br["mfj"])) for k in FILING_STATUSES}
+    ss_raw = raw.get("social_security", {})
+    ss = SocialSecurityRule(
+        exempt_from_age=ss_raw.get("exempt_from_age"),
+        exempt_if_agi_at_most=_status_table(ss_raw["exempt_if_agi_at_most"]) if "exempt_if_agi_at_most" in ss_raw else None,
+        phaseout_width=_status_table(ss_raw["phaseout_width"]) if "phaseout_width" in ss_raw else None,
+        exempt_fraction_above=float(ss_raw.get("exempt_fraction_above", 0.0)),
+    )
+    exclusions = []
+    if raw.get("exempt_retirement_income"):
+        exclusions.append(RetirementExclusion(math.inf, int(raw.get("retirement_min_age", 0))))
+    for ex in raw.get("retirement_exclusions", []):
+        amt = ex.get("amount", "unlimited")
+        exclusions.append(
+            RetirementExclusion(
+                amount=math.inf if amt == "unlimited" else float(amt),
+                min_age=int(ex.get("min_age", 0)),
+                applies_to=tuple(ex.get("applies_to", ("pension", "ira"))),
+            )
+        )
+    age_ded = raw.get("age_deduction")
+    gains = raw.get("capital_gains_tax")
     return StateLaw(
         code=str(raw["code"]).upper(),
         name=str(raw.get("name", raw["code"])),
         year=raw.get("year"),
         taxes_social_security=bool(raw.get("taxes_social_security", False)),
-        capital_gains_as_ordinary=bool(raw.get("capital_gains_as_ordinary", True)),
-        exempt_retirement_income=bool(raw.get("exempt_retirement_income", False)),
-        brackets={k: Schedule.from_pairs(raw["brackets"][k]) for k in FILING_STATUSES},
-        standard_deduction=_by_status(raw.get("standard_deduction", {k: 0 for k in FILING_STATUSES})),
+        brackets=brackets,
+        standard_deduction=_status_table(raw.get("standard_deduction")),
         exemption_per_person=float(raw.get("exemption", {}).get("per_person", 0.0)),
+        credit_per_person=float(raw.get("exemption", {}).get("credit_per_person", 0.0)),
+        filer_credit=_status_table(raw["filer_credit"]) if "filer_credit" in raw else None,
         surcharges=surcharges,
+        has_income_tax=bool(raw.get("has_income_tax", True)),
+        social_security=ss,
+        retirement_exclusions=tuple(exclusions),
+        age_deduction=(float(age_ded["amount"]), int(age_ded["min_age"])) if age_ded else None,
+        capital_gains_exclusion=float(raw.get("capital_gains_exclusion", 0.0)),
+        capital_gains_max_rate=raw.get("capital_gains_max_rate"),
+        gains_only_tax=Schedule.from_pairs(gains["brackets"]) if gains else None,
+        gains_only_deduction=float(gains.get("deduction", 0.0)) if gains else 0.0,
+        notes=tuple(raw.get("notes", ())),
+        sources=tuple(raw.get("sources", ())),
     )
 
 
@@ -244,8 +319,6 @@ def _no_tax_state(code: str) -> StateLaw:
         name=code,
         year=None,
         taxes_social_security=False,
-        capital_gains_as_ordinary=True,
-        exempt_retirement_income=False,
         brackets={k: zero for k in FILING_STATUSES},
         standard_deduction={k: 0.0 for k in FILING_STATUSES},
         has_income_tax=False,

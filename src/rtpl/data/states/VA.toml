@@ -1,0 +1,27 @@
+# Virginia personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "VA"
+name = "Virginia"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Age deduction of $12,000 at 65+ modelled without its income phase-out.",
+]
+
+[brackets]
+single = [[0, 0.02], [3000, 0.03], [5000, 0.05], [17000, 0.0575]]
+mfj    = [[0, 0.02], [3000, 0.03], [5000, 0.05], [17000, 0.0575]]
+
+[standard_deduction]
+single = 8750
+mfj    = 17500
+
+[exemption]
+per_person = 930
+
+[age_deduction]
+amount = 12000
+min_age = 65

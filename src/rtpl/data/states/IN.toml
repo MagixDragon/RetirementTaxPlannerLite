@@ -1,0 +1,23 @@
+# Indiana personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "IN"
+name = "Indiana"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "County income taxes (about 1-3%) not modelled; $1,000 extra exemption at 65+ not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0295]]
+mfj    = [[0, 0.0295]]
+
+[standard_deduction]
+single = 0
+mfj    = 0
+
+[exemption]
+per_person = 1000

@@ -67,7 +67,10 @@ package, put your own copy of a file in the `taxlaw/federal` or
 `taxlaw/states` folder of your user config directory; it wins over the
 shipped one.
 
-Included: federal 2025 and 2026; California and Illinois starter files;
-the states with no wage income tax.
+Included: federal 2025 and 2026, and 2026 files for all 50 states plus
+DC (brackets, deductions and exemptions from the Tax Foundation's 2026
+table, plus Social Security and pension/IRA exclusions for retirees, and
+Washington's capital gains tax). Each state file lists what it leaves out
+under `notes`; hover over the state checkbox in the app to read them.
 
 See [docs/design.md](docs/design.md) for how everything works.

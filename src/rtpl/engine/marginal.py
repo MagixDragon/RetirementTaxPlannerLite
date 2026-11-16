@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from rtpl.model.profile import Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
+from .state import has_state_tax
 from .tax import IncomeSource, TaxResult, compute_tax
 
 LAYERS = ("ordinary", "ss", "cg", "senior", "niit", "state")  # stack order, bottom up
@@ -315,7 +316,7 @@ def default_visibility(series: MarginalSeries) -> dict[str, bool]:
         or series.source is not IncomeSource.ORDINARY
         or p.household.has_taxable_brokerage
     )
-    vis["state"] = series.state is not None and series.state.has_income_tax
+    vis["state"] = has_state_tax(series.state)
     # IRMAA uses income from two years before the premium year, so it
     # matters from age 63, or for anyone already on Medicare (e.g. SSDI).
     lookahead = p.year + series.law.irmaa_lookback

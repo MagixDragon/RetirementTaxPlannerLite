@@ -70,6 +70,14 @@ reference points. A `[policy]` table holds switches:
 * `aca_enhanced_subsidies` (true for 2025; false for 2026, which brings
   back the 400% FPL cliff)
 
+**State files** (`data/states/XX.toml`, all 50 states plus DC for 2026)
+hold brackets, standard deduction, personal exemptions (as deductions or
+credits), a Social Security rule (exempt, taxed, exempt from an age, or
+exempt below an AGI limit with an optional phase-out), per-person
+pension/IRA exclusions with minimum ages, an age-based deduction, capital
+gains exclusions or rate caps, and a gains-only tax (Washington). hoh and
+mfs use the single values unless a file lists them.
+
 **User overrides.** The app also reads a `taxlaw` folder in the user's
 config directory; a file there replaces the shipped file for that year or
 state. Nothing needs code changes.
@@ -164,8 +172,10 @@ values into the theme file.
 ## Not modelled yet
 
 Credits (child, saver's, elderly), AMT, QBI, the 0.9% additional Medicare
-tax, self-employment tax, state credits and most state retirement
-exclusions, Washington's capital gains tax, ACA premium tax credit dollar
+tax, self-employment tax, local income taxes, most state credits, and the
+state rules each state file lists under `notes` (income phase-outs of
+state exemptions, cliff-style pension exclusions, special capital gains
+rates), ACA premium tax credit dollar
 amounts (only the thresholds are drawn), widow(er) filing transitions.
 
 ## Forward-looking plan (next)

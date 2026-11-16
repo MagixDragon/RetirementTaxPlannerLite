@@ -1,0 +1,22 @@
+# Missouri personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "MO"
+name = "Missouri"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+capital_gains_exclusion = 1.0
+notes = [
+  "Capital gains exempt from 2025.",
+  "Public pension and private pension exemptions not modelled.",
+]
+
+[brackets]
+single = [[0, 0], [1348, 0.02], [2696, 0.025], [4044, 0.03], [5392, 0.035], [6740, 0.04], [8088, 0.045], [9436, 0.047]]
+mfj    = [[0, 0], [1348, 0.02], [2696, 0.025], [4044, 0.03], [5392, 0.035], [6740, 0.04], [8088, 0.045], [9436, 0.047]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200

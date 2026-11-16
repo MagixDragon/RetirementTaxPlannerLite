@@ -1,0 +1,26 @@
+# Michigan personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "MI"
+name = "Michigan"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Retirement deduction fully phased in for 2026; per-person limit approximated from the 2025 amount. City income taxes not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0425]]
+mfj    = [[0, 0.0425]]
+
+[standard_deduction]
+single = 0
+mfj    = 0
+
+[exemption]
+per_person = 5900
+
+[[retirement_exclusions]]
+amount = 65897

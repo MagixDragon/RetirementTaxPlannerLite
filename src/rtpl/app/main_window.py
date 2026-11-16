@@ -389,6 +389,11 @@ class MainWindow(QMainWindow):
         state_cb = self.checks["state"]
         state_cb.setText(self.series.state.label if self.series.state else "State tax")
         state_cb.setEnabled(self.series.state is not None)
+        st = self.series.state
+        state_cb.setToolTip(
+            "\n".join([f"{st.name} ({st.year or ''})", *st.notes, *(f"Source: {x}" for x in st.sources)])
+            if st else "Choose a state in the profile to add this layer."
+        )
         self.redraw()
         b = self.series.baseline
         self.statusBar().showMessage(

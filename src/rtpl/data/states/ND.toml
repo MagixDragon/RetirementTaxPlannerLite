@@ -1,0 +1,18 @@
+# North Dakota personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "ND"
+name = "North Dakota"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+capital_gains_exclusion = 0.4
+
+[brackets]
+single = [[0, 0], [48475, 0.0195], [244825, 0.025]]
+mfj    = [[0, 0], [80975, 0.0195], [298075, 0.025]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200

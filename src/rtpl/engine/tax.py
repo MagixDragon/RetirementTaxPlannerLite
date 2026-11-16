@@ -25,6 +25,8 @@ from enum import Enum
 from rtpl.model.profile import Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, status_key
 
+from .state import state_income_tax
+
 
 class IncomeSource(str, Enum):
     """What kind of income the marginal graph adds along its X axis."""
@@ -189,18 +191,10 @@ def compute_tax(
     niit = law.niit_rate * max(0.0, min(nii, agi - law.niit_threshold[fs]))
 
     state_tax = 0.0
-    if state is not None and state.has_income_tax:
-        base = agi
-        if not state.taxes_social_security:
-            base -= taxable_ss
-        if state.exempt_retirement_income:
-            base -= retirement
-        base -= state.standard_deduction[fs]
-        base -= state.exemption_per_person * len(profile.people)
-        base = max(0.0, base)
-        state_tax = state.brackets[fs].tax(base)
-        for rate, threshold in state.surcharges:
-            state_tax += rate * max(0.0, base - threshold)
+    if state is not None:
+        state_tax = state_income_tax(
+            profile, state, agi=agi, taxable_ss=taxable_ss, net_ltcg=ltcg, extra_ira=add_ord
+        )
 
     return TaxResult(
         ordinary_income=ordinary,

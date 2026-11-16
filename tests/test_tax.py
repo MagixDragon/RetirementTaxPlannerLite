@@ -113,15 +113,15 @@ def test_state_california_excludes_social_security(lib):
     )
     law, ca = lib.federal(2026), lib.state("CA")
     r = compute_tax(p, law, ca)
-    expected_base = 60_000 - 5_706
-    assert r.state_tax == pytest.approx(ca.brackets["single"].tax(expected_base))
+    expected_base = 60_000 - 5_540
+    assert r.state_tax == pytest.approx(ca.brackets["single"].tax(expected_base) - 153)
     assert ca.label == "State Tax (CA)"
 
 
 def test_state_illinois_exempts_retirement_income(lib):
     p = make(state="IL", people=[Person(birth_year=1955, ira_distributions=50_000)], taxable_interest=10_000)
     r = compute_tax(p, lib.federal(2026), lib.state("IL"))
-    assert r.state_tax == pytest.approx((10_000 - 2_850) * 0.0495)
+    assert r.state_tax == pytest.approx((10_000 - 2_925) * 0.0495)
 
 
 def test_no_income_tax_state(lib):
@@ -129,3 +129,62 @@ def test_no_income_tax_state(lib):
     assert not tx.has_income_tax
     p = make(state="TX", people=[Person(birth_year=1980, wages=100_000)])
     assert compute_tax(p, lib.federal(2026), tx).state_tax == 0
+
+
+def test_north_carolina_flat_tax_exempts_social_security(lib):
+    p = make(state="NC", people=[Person(birth_year=1958, social_security=30_000, ira_distributions=60_000)])
+    r = compute_tax(p, lib.federal(2026), lib.state("NC"))
+    assert r.state_tax == pytest.approx((60_000 - 12_750) * 0.0399)
+
+
+def test_washington_taxes_only_large_long_term_gains(lib):
+    wa = lib.state("WA")
+    law = lib.federal(2026)
+    p = make(state="WA", people=[Person(birth_year=1958, ira_distributions=500_000)], qualified_dividends=50_000)
+    assert compute_tax(p, law, wa).state_tax == 0  # wages, IRA and dividends untaxed
+    gains = make(state="WA", long_term_capital_gains=378_000)
+    assert compute_tax(gains, law, wa).state_tax == pytest.approx(0.07 * 100_000)
+    big = make(state="WA", long_term_capital_gains=1_478_000)
+    assert compute_tax(big, law, wa).state_tax == pytest.approx(0.07 * 1_000_000 + 0.099 * 200_000)
+
+
+def test_retirement_exclusion_per_person_and_age(lib):
+    ny = lib.state("NY")
+    law = lib.federal(2026)
+    young = make(state="NY", people=[Person(birth_year=1970, ira_distributions=30_000)])
+    old = make(state="NY", people=[Person(birth_year=1960, ira_distributions=30_000)])
+    assert compute_tax(old, law, ny).state_tax < compute_tax(young, law, ny).state_tax
+    assert compute_tax(old, law, ny).state_tax == pytest.approx(ny.brackets["single"].tax(30_000 - 20_000 - 8_000))
+
+
+def test_state_social_security_agi_cliff(lib):
+    nm = lib.state("NM")
+    law = lib.federal(2026)
+    low = make(state="NM", people=[Person(birth_year=1958, social_security=40_000, ira_distributions=50_000)])
+    r = compute_tax(low, law, nm)
+    assert r.state_tax == pytest.approx(nm.brackets["single"].tax(max(0, r.agi - r.taxable_social_security - 16_100)))
+    high = make(state="NM", people=[Person(birth_year=1958, social_security=40_000, ira_distributions=120_000)])
+    r = compute_tax(high, law, nm)
+    assert r.state_tax == pytest.approx(nm.brackets["single"].tax(r.agi - 16_100))
+
+
+def test_capital_gains_exclusion_and_cap(lib):
+    law = lib.federal(2026)
+    mo = make(state="MO", long_term_capital_gains=100_000)
+    assert compute_tax(mo, law, lib.state("MO")).state_tax == 0
+    hi = lib.state("HI")
+    p = make(state="HI", long_term_capital_gains=500_000)
+    r = compute_tax(p, law, hi)
+    base = 500_000 - 4_400 - 1_144
+    assert r.state_tax == pytest.approx(min(hi.brackets["single"].tax(base), 0.0725 * base))
+
+
+def test_every_state_loads_and_computes(lib):
+    law = lib.federal(2026)
+    codes = lib.available_states()
+    assert len(codes) == 51  # 50 states + DC
+    for code in codes:
+        st = lib.state(code)
+        p = make(state=code, people=[Person(birth_year=1958, social_security=30_000, ira_distributions=80_000)],
+                 qualified_dividends=10_000, long_term_capital_gains=10_000)
+        assert compute_tax(p, law, st).state_tax >= 0

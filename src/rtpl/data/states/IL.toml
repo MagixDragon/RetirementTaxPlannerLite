@@ -1,26 +1,26 @@
-# Illinois: flat income tax. Social Security and most retirement income
-# (IRA distributions, pensions) are exempt. Starter data; verify before use.
+# Illinois personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
 
 code = "IL"
 name = "Illinois"
-year = 2025
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
 taxes_social_security = false
-capital_gains_as_ordinary = true
-exempt_retirement_income = true
-uses_federal_agi = true
+notes = [
+  "Social Security and retirement income (pensions, IRAs) are exempt.",
+]
 
 [brackets]
 single = [[0, 0.0495]]
 mfj    = [[0, 0.0495]]
-mfs    = [[0, 0.0495]]
-hoh    = [[0, 0.0495]]
 
 [standard_deduction]
-# Illinois uses a per-person exemption instead of a standard deduction.
 single = 0
 mfj    = 0
-mfs    = 0
-hoh    = 0
 
 [exemption]
-per_person = 2850
+per_person = 2925
+
+[[retirement_exclusions]]
+amount = "unlimited"

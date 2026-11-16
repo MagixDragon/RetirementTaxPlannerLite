@@ -1,0 +1,27 @@
+# Iowa personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "IA"
+name = "Iowa"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Retirement income exempt at 55+.",
+]
+
+[brackets]
+single = [[0, 0.038]]
+mfj    = [[0, 0.038]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200
+
+[exemption]
+credit_per_person = 40
+
+[[retirement_exclusions]]
+amount = "unlimited"
+min_age = 55

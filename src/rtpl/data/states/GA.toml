@@ -1,0 +1,24 @@
+# Georgia personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "GA"
+name = "Georgia"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+notes = [
+  "Retirement exclusion $65,000 per person at 65+ (also covers interest, dividends and gains, modelled on pension/IRA only); $35,000 at 62-64 not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0519]]
+mfj    = [[0, 0.0519]]
+
+[standard_deduction]
+single = 12000
+mfj    = 24000
+
+[[retirement_exclusions]]
+amount = 65000
+min_age = 65

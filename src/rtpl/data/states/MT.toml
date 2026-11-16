@@ -1,0 +1,20 @@
+# Montana personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "MT"
+name = "Montana"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Lower capital gains rates and the 65+ subtraction not modelled; Social Security taxed as federally.",
+]
+
+[brackets]
+single = [[0, 0.047], [47500, 0.0565]]
+mfj    = [[0, 0.047], [95000, 0.0565]]
+
+[standard_deduction]
+single = 16100
+mfj    = 32200

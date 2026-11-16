@@ -1,0 +1,27 @@
+# Vermont personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "VT"
+name = "Vermont"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = true
+notes = [
+  "Social Security exemption limits approximated; capital gains exclusion not modelled.",
+]
+
+[brackets]
+single = [[0, 0.0335], [49400, 0.066], [119700, 0.076], [249700, 0.0875]]
+mfj    = [[0, 0.0335], [82500, 0.066], [199450, 0.076], [304000, 0.0875]]
+
+[standard_deduction]
+single = 7650
+mfj    = 15300
+
+[exemption]
+per_person = 5300
+
+[social_security]
+exempt_if_agi_at_most = { single = 50000, mfj = 65000 }
+phaseout_width = { single = 10000, mfj = 10000 }

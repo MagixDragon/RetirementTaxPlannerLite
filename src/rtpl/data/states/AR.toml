@@ -1,0 +1,28 @@
+# Arkansas personal income tax, 2026.
+# Generated from the sources below; edit freely. hoh and mfs use the
+# single values unless listed.
+
+code = "AR"
+name = "Arkansas"
+year = 2026
+sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
+taxes_social_security = false
+capital_gains_exclusion = 0.5
+notes = [
+  "Personal exemption is a $29 credit per person.",
+  "50% of net capital gains excluded.",
+]
+
+[brackets]
+single = [[0, 0.02], [4600, 0.039]]
+mfj    = [[0, 0.02], [4600, 0.039]]
+
+[standard_deduction]
+single = 2470
+mfj    = 4940
+
+[exemption]
+credit_per_person = 29
+
+[[retirement_exclusions]]
+amount = 6000
