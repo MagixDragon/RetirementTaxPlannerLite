@@ -62,6 +62,16 @@ class Annotation:
     sublabel: str = ""  # second line on the chart, e.g. "+$2,413/year"
 
 
+@dataclass(frozen=True)
+class Breakpoint:
+    x: float  # additional income where these rates start, to the cent
+    rates: dict[str, float]  # marginal rate per layer from here on
+
+    @property
+    def total(self) -> float:
+        return sum(self.rates[k] for k in LAYERS)
+
+
 @dataclass
 class MarginalSeries:
     profile: Profile
@@ -91,19 +101,58 @@ class MarginalSeries:
     def nonzero_layers(self, tol: float = 1e-9) -> set[str]:
         return {k for k in LAYERS if any(abs(v) > tol for v in self.layers[k])}
 
+    def breakpoints(self, tol: float = 0.01) -> list[Breakpoint]:
+        """Every exact point where any layer's rate changes, with the new rates.
+
+        The chart works in steps of ``step`` dollars, so a step that
+        straddles a threshold (say the top of the 12% bracket at $72,685)
+        shows a blend of the rates on each side, such as 13.5%. This finds
+        each threshold to within ``tol`` dollars by bisection on the real
+        tax calculation, and reports the pure rate that starts there, so the
+        data table never shows a blended rate.
+        """
+        def rates(xa: float, xb: float) -> dict[str, float]:
+            return _layer_rates(self.profile, self.law, self.state, self.source, xa, xb)
+
+        probe = min(1.0, self.step / 2)
+        x_end = self.x[-1] + self.step if self.x else 0.0
+        cur_x = 0.0
+        cur = rates(0.0, probe)
+        out = [Breakpoint(0.0, cur)]
+        for i, x0 in enumerate(self.x):
+            x1 = x0 + self.step
+            step_rates = {k: self.layers[k][i] for k in LAYERS}
+            if _same_rates(step_rates, cur):
+                continue
+            lo = max(x0, cur_x)
+            # One step can hold more than one threshold, so keep going until
+            # the rest of the step is a straight line at the current rates.
+            while lo < x1 - tol and not _same_rates(rates(lo, x1), cur):
+                a, b = lo, x1
+                while b - a > tol:
+                    m = (a + b) / 2
+                    if _same_rates(rates(lo, m), cur):
+                        a = m
+                    else:
+                        b = m
+                k = round(b, 2)
+                cur = rates(k, min(k + probe, x_end))
+                cur_x = lo = k
+                if not _same_rates(cur, out[-1].rates):
+                    out.append(Breakpoint(k, cur))
+        return out
+
     def rate_changes(self) -> list[tuple[float, float]]:
-        """(x, total rate) at every point where the total rate changes.
+        """(x, total rate) at every exact point where the total rate changes.
 
         Used for the accessible data table, so screen reader users get the
         same information as the chart.
         """
         out: list[tuple[float, float]] = []
-        prev = None
-        for xi, r in zip(self.x, self.total):
-            r = round(r, 4)
-            if prev is None or abs(r - prev) > 1e-4:
-                out.append((xi, r))
-                prev = r
+        for bp in self.breakpoints():
+            r = round(bp.total, 4)
+            if not out or abs(r - out[-1][1]) > 1e-4:
+                out.append((bp.x, r))
         return out
 
 
@@ -136,30 +185,9 @@ def build_marginal_series(
     layers: dict[str, list[float]] = {k: [] for k in LAYERS}
 
     for i in range(n):
-        a, b = results[i], results[i + 1]
-        xb = grid[i + 1]
-        # Tax with taxable Social Security and the senior deduction frozen at a
-        frozen_both = compute_tax(
-            profile, law, state, extra=xb, source=source,
-            taxable_ss_override=a.taxable_social_security,
-            senior_deduction_override=a.senior_deduction,
-        )
-        frozen_senior = compute_tax(
-            profile, law, state, extra=xb, source=source,
-            senior_deduction_override=a.senior_deduction,
-        )
-        def income_tax(r: TaxResult) -> float:
-            return r.ordinary_tax + r.capital_gains_tax
-
-        layers["ordinary"].append((frozen_both.ordinary_tax - a.ordinary_tax) / step)
-        layers["cg"].append((frozen_both.capital_gains_tax - a.capital_gains_tax) / step)
-        layers["ss"].append((income_tax(frozen_senior) - income_tax(frozen_both)) / step)
-        layers["senior"].append((income_tax(b) - income_tax(frozen_senior)) / step)
-        layers["niit"].append((b.niit - a.niit) / step)
-        layers["state"].append(
-            ((b.state_tax - b.state_gains_tax) - (a.state_tax - a.state_gains_tax)) / step
-        )
-        layers["state_cg"].append((b.state_gains_tax - a.state_gains_tax) / step)
+        rates = _layer_rates(profile, law, state, source, grid[i], grid[i + 1], results[i], results[i + 1])
+        for k in LAYERS:
+            layers[k].append(rates[k])
 
     series = MarginalSeries(
         profile=profile,
@@ -180,6 +208,55 @@ def build_marginal_series(
     series.annotations.extend(irmaa_annotations(series, library, irmaa_basis))
     series.annotations.extend(aca_annotations(series))
     return series
+
+
+def _layer_rates(
+    profile: Profile,
+    law: FederalLaw,
+    state: StateLaw | None,
+    source: IncomeSource,
+    xa: float,
+    xb: float,
+    a: TaxResult | None = None,
+    b: TaxResult | None = None,
+) -> dict[str, float]:
+    """Average marginal rate of each layer between ``xa`` and ``xb`` added dollars.
+
+    The split uses counterfactual recomputations (taxable Social Security
+    and the senior deduction frozen at ``xa``), so the layers always add up
+    to the true change in total tax.
+    """
+    if a is None:
+        a = compute_tax(profile, law, state, extra=xa, source=source)
+    if b is None:
+        b = compute_tax(profile, law, state, extra=xb, source=source)
+    width = xb - xa
+    frozen_both = compute_tax(
+        profile, law, state, extra=xb, source=source,
+        taxable_ss_override=a.taxable_social_security,
+        senior_deduction_override=a.senior_deduction,
+    )
+    frozen_senior = compute_tax(
+        profile, law, state, extra=xb, source=source,
+        senior_deduction_override=a.senior_deduction,
+    )
+
+    def income_tax(r: TaxResult) -> float:
+        return r.ordinary_tax + r.capital_gains_tax
+
+    return {
+        "ordinary": (frozen_both.ordinary_tax - a.ordinary_tax) / width,
+        "cg": (frozen_both.capital_gains_tax - a.capital_gains_tax) / width,
+        "ss": (income_tax(frozen_senior) - income_tax(frozen_both)) / width,
+        "senior": (income_tax(b) - income_tax(frozen_senior)) / width,
+        "niit": (b.niit - a.niit) / width,
+        "state": ((b.state_tax - b.state_gains_tax) - (a.state_tax - a.state_gains_tax)) / width,
+        "state_cg": (b.state_gains_tax - a.state_gains_tax) / width,
+    }
+
+
+def _same_rates(r1: dict[str, float], r2: dict[str, float], tol: float = 1e-6) -> bool:
+    return all(abs(r1[k] - r2[k]) <= tol for k in LAYERS)
 
 
 # -- annotations -------------------------------------------------------------

@@ -522,13 +522,15 @@ class MainWindow(QMainWindow):
         shown = [k for k in LAYERS if vis.get(k)]
         rows: list[tuple[float, str, str]] = []
         prev = None
-        for i, x in enumerate(s.x):
-            total = round(sum(s.layers[k][i] for k in shown), 4)
+        # Exact thresholds rather than chart steps, so no row shows a blend
+        # of the rates on either side of a threshold.
+        for bp in s.breakpoints():
+            total = round(sum(bp.rates[k] for k in shown), 4)
             if prev is None or abs(total - prev) > 1e-4:
                 parts = [
-                    f"{s.layer_label(k)} {s.layers[k][i]:.1%}" for k in shown if abs(s.layers[k][i]) > 1e-6
+                    f"{s.layer_label(k)} {bp.rates[k]:.1%}" for k in shown if abs(bp.rates[k]) > 1e-6
                 ]
-                rows.append((x, f"{total:.1%}", ", ".join(parts)))
+                rows.append((bp.x, f"{total:.1%}", ", ".join(parts)))
                 prev = total
         for a in s.annotations:
             if vis.get(a.kind):
