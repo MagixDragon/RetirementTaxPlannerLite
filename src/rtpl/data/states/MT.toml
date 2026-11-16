@@ -8,7 +8,8 @@ year = 2026
 sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
 taxes_social_security = true
 notes = [
-  "Lower capital gains rates and the 65+ subtraction not modelled; Social Security taxed as federally.",
+  "Net long-term capital gains taxed at 3.0% / 4.1% (stacked on other income); qualified dividends taxed as ordinary.",
+  "65+ subtraction not modelled; Social Security taxed as federally.",
 ]
 
 [brackets]
@@ -18,3 +19,7 @@ mfj    = [[0, 0.047], [95000, 0.0565]]
 [standard_deduction]
 single = 16100
 mfj    = 32200
+
+[capital_gains_rates]
+single = [[0, 0.03], [47500, 0.041]]
+mfj    = [[0, 0.03], [95000, 0.041]]

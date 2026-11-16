@@ -182,3 +182,15 @@ def test_irmaa_labels_show_added_premium_and_footnote(lib):
     assert s.irmaa_note.startswith("IRMAA lines: 2026 published brackets")
     s2 = build_marginal_series(p, lib, x_max=250_000)
     assert "2028 brackets (premium year for 2026 income), projected at 2.5%" in s2.irmaa_note
+
+
+def test_washington_gains_tax_has_its_own_layer(lib):
+    p = Profile.load("examples/profiles/couple_selling_stock_wa.json")
+    s = build_marginal_series(p, lib, source=IncomeSource.LTCG, x_max=150_000)
+    assert rate_at(s, 100_000, "state_cg") == pytest.approx(0.07)
+    assert rate_at(s, 100_000, "state") == 0
+    assert s.layer_label("state_cg") == "State CG&QD Tax (WA)"
+    v = default_visibility(s)
+    assert v["state_cg"] and not v["state"]
+    ca = build_marginal_series(Profile.load("examples/profiles/retired_couple_ca.json"), lib, x_max=50_000)
+    assert not default_visibility(ca)["state_cg"]

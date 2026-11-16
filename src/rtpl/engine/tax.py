@@ -73,7 +73,8 @@ class TaxResult:
     ordinary_tax: float
     capital_gains_tax: float
     niit: float
-    state_tax: float
+    state_tax: float  # all state tax, including state_gains_tax
+    state_gains_tax: float = 0.0  # under the state's separate capital gains rules
 
     @property
     def federal_tax(self) -> float:
@@ -190,11 +191,12 @@ def compute_tax(
     )
     niit = law.niit_rate * max(0.0, min(nii, agi - law.niit_threshold[fs]))
 
-    state_tax = 0.0
+    state_tax = state_gains_tax = 0.0
     if state is not None:
-        state_tax = state_income_tax(
+        state_income, state_gains_tax = state_income_tax(
             profile, state, agi=agi, taxable_ss=taxable_ss, net_ltcg=ltcg, extra_ira=add_ord
         )
+        state_tax = state_income + state_gains_tax
 
     return TaxResult(
         ordinary_income=ordinary,
@@ -214,4 +216,5 @@ def compute_tax(
         capital_gains_tax=cg_tax,
         niit=niit,
         state_tax=state_tax,
+        state_gains_tax=state_gains_tax,
     )

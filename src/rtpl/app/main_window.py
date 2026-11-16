@@ -304,6 +304,7 @@ class MainWindow(QMainWindow):
             cg="Capital gains / QD tax",
             niit="NIIT",
             state="State tax",
+            state_cg="State CG & QD tax",
         )
         names.update(ANNOTATION_LABELS)
         for i, key in enumerate([*LAYERS, *ANNOTATIONS]):
@@ -390,6 +391,15 @@ class MainWindow(QMainWindow):
         state_cb.setText(self.series.state.label if self.series.state else "State tax")
         state_cb.setEnabled(self.series.state is not None)
         st = self.series.state
+        state_cb.setEnabled(st is not None and st.has_income_tax)
+        cg_cb = self.checks["state_cg"]
+        cg_cb.setText(st.gains_label if st else "State CG & QD tax")
+        cg_cb.setEnabled(st is not None and st.has_separate_gains_tax)
+        cg_cb.setToolTip(
+            "Tax under the state's own capital gains rules (Washington's gains tax, "
+            "Montana's gains rates, Hawaii's gains rate cap). Where a state taxes gains "
+            "as regular income, that tax is in the State Tax layer."
+        )
         state_cb.setToolTip(
             "\n".join([f"{st.name} ({st.year or ''})", *st.notes, *(f"Source: {x}" for x in st.sources)])
             if st else "Choose a state in the profile to add this layer."

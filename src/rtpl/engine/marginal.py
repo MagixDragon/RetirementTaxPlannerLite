@@ -14,7 +14,9 @@ layers always add up exactly to the true change in total tax:
 * ``senior``    extra federal income tax because the senior deduction shrank
                 (again including gains it pushes out of the 0% band)
 * ``niit``      Net Investment Income Tax
-* ``state``     the state layer
+* ``state``     state income tax
+* ``state_cg``  state tax under separate capital gains rules (Washington's
+                gains tax, Montana's gains rates, Hawaii's gains rate cap)
 
 So the capital gains layer stays at the statutory 0/15/20% on the added
 income; the knock-on effects of the Social Security and senior deduction
@@ -33,10 +35,9 @@ from dataclasses import dataclass, field
 from rtpl.model.profile import Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
-from .state import has_state_tax
 from .tax import IncomeSource, TaxResult, compute_tax
 
-LAYERS = ("ordinary", "ss", "cg", "senior", "niit", "state")  # stack order, bottom up
+LAYERS = ("ordinary", "ss", "cg", "senior", "niit", "state", "state_cg")  # stack order, bottom up
 ANNOTATIONS = ("irmaa", "aca")
 
 LAYER_LABELS = {
@@ -46,6 +47,7 @@ LAYER_LABELS = {
     "cg": "Capital Gains and Qualified Dividends Tax",
     "niit": "Net Investment Income Tax",
     "state": "State Tax",
+    "state_cg": "State CG&QD Tax",
 }
 
 
@@ -82,6 +84,8 @@ class MarginalSeries:
     def layer_label(self, key: str) -> str:
         if key == "state":
             return self.state.label if self.state else "State Tax"
+        if key == "state_cg":
+            return self.state.gains_label if self.state else "State CG&QD Tax"
         return LAYER_LABELS[key]
 
     def nonzero_layers(self, tol: float = 1e-9) -> set[str]:
@@ -152,7 +156,10 @@ def build_marginal_series(
         layers["ss"].append((income_tax(frozen_senior) - income_tax(frozen_both)) / step)
         layers["senior"].append((income_tax(b) - income_tax(frozen_senior)) / step)
         layers["niit"].append((b.niit - a.niit) / step)
-        layers["state"].append((b.state_tax - a.state_tax) / step)
+        layers["state"].append(
+            ((b.state_tax - b.state_gains_tax) - (a.state_tax - a.state_gains_tax)) / step
+        )
+        layers["state_cg"].append((b.state_gains_tax - a.state_gains_tax) / step)
 
     series = MarginalSeries(
         profile=profile,
@@ -316,7 +323,13 @@ def default_visibility(series: MarginalSeries) -> dict[str, bool]:
         or series.source is not IncomeSource.ORDINARY
         or p.household.has_taxable_brokerage
     )
-    vis["state"] = has_state_tax(series.state)
+    st = series.state
+    vis["state"] = st is not None and st.has_income_tax
+    vis["state_cg"] = st is not None and st.has_separate_gains_tax and (
+        "state_cg" in active
+        or series.source is not IncomeSource.ORDINARY
+        or p.household.has_taxable_brokerage
+    )
     # IRMAA uses income from two years before the premium year, so it
     # matters from age 63, or for anyone already on Medicare (e.g. SSDI).
     lookahead = p.year + series.law.irmaa_lookback

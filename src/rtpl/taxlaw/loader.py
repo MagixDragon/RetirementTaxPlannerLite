@@ -239,12 +239,25 @@ class StateLaw:
     capital_gains_max_rate: float | None = None  # alternative cap on the rate for gains
     gains_only_tax: Schedule | None = None  # e.g. Washington: tax on long-term gains only
     gains_only_deduction: float = 0.0
+    gains_rates: dict[str, Schedule] | None = None  # separate stacked rates for long-term gains (MT)
     notes: tuple[str, ...] = ()
     sources: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
         return f"State Tax ({self.code})"
+
+    @property
+    def gains_label(self) -> str:
+        return f"State CG&QD Tax ({self.code})"
+
+    @property
+    def has_separate_gains_tax(self) -> bool:
+        return (
+            self.gains_only_tax is not None
+            or self.gains_rates is not None
+            or self.capital_gains_max_rate is not None
+        )
 
 
 def _status_table(table: dict | None, cast=float, default=0.0) -> dict[str, float]:
@@ -307,6 +320,10 @@ def _parse_state(raw: dict) -> StateLaw:
         capital_gains_max_rate=raw.get("capital_gains_max_rate"),
         gains_only_tax=Schedule.from_pairs(gains["brackets"]) if gains else None,
         gains_only_deduction=float(gains.get("deduction", 0.0)) if gains else 0.0,
+        gains_rates=(
+            {k: Schedule.from_pairs(raw["capital_gains_rates"].get(k, raw["capital_gains_rates"]["single"] if k != "mfj" else raw["capital_gains_rates"]["mfj"])) for k in FILING_STATUSES}
+            if "capital_gains_rates" in raw else None
+        ),
         notes=tuple(raw.get("notes", ())),
         sources=tuple(raw.get("sources", ())),
     )

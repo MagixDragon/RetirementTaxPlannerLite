@@ -111,7 +111,8 @@ recomputation, so the layers always sum exactly to the real change:
 | Capital Gains and Qualified Dividends Tax | gains tax change with taxable SS and the senior deduction frozen: the 0/15/20% rate on added gains, or gains pushed out of the 0% band by added ordinary income |
 | Enhanced Senior Deduction Phase-Out | the remaining federal income tax change, including gains it pushes out of the 0% band |
 | Net Investment Income Tax | change in NIIT |
-| State Tax (XX) | change in state tax, labelled with the state code |
+| State Tax (XX) | change in state income tax, labelled with the state code |
+| State CG&QD Tax (XX) | change in tax under the state's own capital gains rules: Washington's gains tax, Montana's gains rates, Hawaii's gains rate cap (states that tax gains as regular income show them in State Tax) |
 
 Knock-on effects are charged to their cause. Example: a married couple,
 both over 65, adds long-term gains while the senior deduction is phasing

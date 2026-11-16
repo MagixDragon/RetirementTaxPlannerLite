@@ -79,9 +79,16 @@ def state_income_tax(
     taxable_ss: float,
     net_ltcg: float,
     extra_ira: float = 0.0,
-) -> float:
+) -> tuple[float, float]:
+    """Return ``(income_tax, gains_tax)``.
+
+    ``gains_tax`` is tax levied under the state's own rules for capital
+    gains: a gains-only tax (Washington), separate stacked gains rates
+    (Montana) or a rate cap on gains (Hawaii). Where a state simply taxes
+    gains as regular income, that tax stays in ``income_tax``.
+    """
     fs = status_key(profile.filing_status)
-    tax = 0.0
+    income_tax = gains_tax = 0.0
     if state.has_income_tax:
         base = agi
         base -= _exempt_social_security(profile, state, agi, taxable_ss)
@@ -95,21 +102,27 @@ def state_income_tax(
         base -= state.exemption_per_person * len(profile.people)
         base = max(0.0, base)
         sched = state.brackets[fs]
-        tax = sched.tax(base)
-        if state.capital_gains_max_rate is not None:
-            gains = min(base, max(0.0, net_ltcg) - cg_excluded)
-            capped = sched.tax(base - gains) + float(state.capital_gains_max_rate) * gains
-            tax = min(tax, capped)
+        gains = min(base, max(0.0, net_ltcg) - cg_excluded)
+        if state.gains_rates is not None:
+            income_tax = sched.tax(base - gains)
+            gains_tax = state.gains_rates[fs].tax_between(base - gains, base)
+        elif state.capital_gains_max_rate is not None:
+            income_tax = sched.tax(base - gains)
+            gains_tax = min(sched.tax(base) - income_tax, float(state.capital_gains_max_rate) * gains)
+        else:
+            income_tax = sched.tax(base)
         for rate, threshold in state.surcharges:
-            tax += rate * max(0.0, base - threshold)
+            income_tax += rate * max(0.0, base - threshold)
         credits = state.credit_per_person * len(profile.people)
         if state.filer_credit is not None:
             credits += state.filer_credit[fs]
-        tax = max(0.0, tax - credits)
+        used = min(credits, income_tax)
+        income_tax -= used
+        gains_tax = max(0.0, gains_tax - (credits - used))
     if state.gains_only_tax is not None:
         taxable_gains = max(0.0, net_ltcg - state.gains_only_deduction)
-        tax += state.gains_only_tax.tax(taxable_gains)
-    return tax
+        gains_tax += state.gains_only_tax.tax(taxable_gains)
+    return income_tax, gains_tax
 
 
 def has_state_tax(state: StateLaw | None) -> bool:

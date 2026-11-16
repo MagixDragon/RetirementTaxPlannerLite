@@ -188,3 +188,18 @@ def test_every_state_loads_and_computes(lib):
         p = make(state=code, people=[Person(birth_year=1958, social_security=30_000, ira_distributions=80_000)],
                  qualified_dividends=10_000, long_term_capital_gains=10_000)
         assert compute_tax(p, law, st).state_tax >= 0
+
+
+def test_separate_gains_taxes_are_reported_apart(lib):
+    law = lib.federal(2026)
+    wa = compute_tax(make(state="WA", long_term_capital_gains=378_000), law, lib.state("WA"))
+    assert wa.state_gains_tax == wa.state_tax == pytest.approx(7_000)
+    ca = compute_tax(make(state="CA", long_term_capital_gains=100_000), law, lib.state("CA"))
+    assert ca.state_gains_tax == 0 and ca.state_tax > 0  # CA taxes gains as regular income
+    mt = lib.state("MT")
+    p = make(state="MT", people=[Person(birth_year=1980, wages=40_000)], long_term_capital_gains=30_000)
+    r = compute_tax(p, law, mt)
+    base = 70_000 - 16_100
+    ordinary_part = base - 30_000
+    assert r.state_gains_tax == pytest.approx(0.03 * (47_500 - ordinary_part) + 0.041 * (base - 47_500))
+    assert r.state_tax - r.state_gains_tax == pytest.approx(mt.brackets["single"].tax(ordinary_part))
