@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from rtpl import __version__
+from rtpl.app.icon import about_pixmap
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.charts.marginal_chart import render_marginal
 from rtpl.engine.marginal import (
@@ -553,10 +554,13 @@ class MainWindow(QMainWindow):
 
     def about(self) -> None:
         years = ", ".join(str(y) for y in self.library.enacted_years)
-        QMessageBox.about(
-            self,
-            f"About {APP_NAME}",
+        box = QMessageBox(self)
+        box.setWindowTitle(f"About {APP_NAME}")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
             f"<b>{APP_NAME}</b> {__version__}<br>Free, open-source tax graphs.<br><br>"
             f"Tax law data files: {years} (later years are projected).<br>"
-            "This is a planning aid, not tax advice.",
+            "This is a planning aid, not tax advice."
         )
+        box.setIconPixmap(about_pixmap(64, self.devicePixelRatioF()))
+        box.exec()
