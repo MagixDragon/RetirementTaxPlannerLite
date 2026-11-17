@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QStackedWidget,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -233,7 +234,6 @@ class MainWindow(QMainWindow):
         # can be pinned beside the graph or pop open over it.
         self.form = ProfileForm(self.library.available_states())
         self.inputs_panel = SidePanel("Inputs", self.form, Qt.Edge.LeftEdge)
-        self.options_panel = SidePanel("Graph options", self._build_options(), Qt.Edge.RightEdge)
         # Center pages: the marginal graph, and the forward-looking plan
         self.plan_path: Path | None = None
         self.plan_view = PlanView(self.library)
@@ -241,6 +241,13 @@ class MainWindow(QMainWindow):
         self.pages = QTabWidget()
         self.pages.addTab(self.tabs, "&Marginal graph")
         self.pages.addTab(self.plan_view, "&Forward plan")
+        # The Graph options panel shows the options of whichever page is active.
+        self.options_stack = QStackedWidget()
+        self.options_stack.addWidget(self._build_options())
+        self.options_stack.addWidget(self.plan_view.options_widget)
+        self.options_panel = SidePanel("Graph options", self.options_stack, Qt.Edge.RightEdge)
+        self.pages.currentChanged.connect(self._page_changed)
+        self._page_changed(self.pages.currentIndex())
         workspace = QWidget()
         self.panels = PanelHost(workspace, self.pages)
         self.setCentralWidget(workspace)
@@ -348,6 +355,16 @@ class MainWindow(QMainWindow):
         self.x_max.valueChanged.connect(self._schedule)
         self.irmaa_basis.currentIndexChanged.connect(self._schedule)
         return box
+
+    def _page_changed(self, index: int) -> None:
+        self.options_stack.setCurrentIndex(index)
+        # Only the shown page's options count toward the panel's size.
+        for i in range(self.options_stack.count()):
+            policy = QSizePolicy.Policy.Preferred if i == index else QSizePolicy.Policy.Ignored
+            self.options_stack.widget(i).setSizePolicy(policy, policy)
+        name = "Forward plan options" if self.pages.widget(index) is self.plan_view else "Marginal graph options"
+        self.options_panel.title.setText(f"<b>{name}</b>")
+        self.options_panel.setAccessibleName(name)
 
     def _build_toolbar(self) -> None:
         bar = QToolBar("Panels")
