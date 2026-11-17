@@ -155,7 +155,7 @@ def test_untick_an_income_switches_it_off(window):
 def test_add_duplicate_and_delete(window):
     ed = window.plan_editor
     plan = window.plan_view.plan
-    ed.add_item("roth_conversion")
+    ed.add_actions["roth_conversion"].trigger()  # the Add item menu
     new = plan.rules[-1]
     assert new.kind == "roth_conversion" and ed.current_object() is new
     ed.duplicate_item()

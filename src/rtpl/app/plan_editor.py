@@ -52,7 +52,8 @@ from rtpl.model.plan import (
 )
 
 ROLE = Qt.ItemDataRole.UserRole  # (kind, object) of a row
-BAR_ROLE = Qt.ItemDataRole.UserRole + 1  # (first, last, color, milestone) for the bar column
+BAR_ROLE = Qt.ItemDataRole.UserRole + 1  # (first, last, color, milestone 0 or 1) for the bar column; no bools,
+# which PySide 6.12 on Python 3.11 loses references to when they pass through a QVariant
 
 GROUPS = (
     ("accounts", "Accounts"),
@@ -854,12 +855,12 @@ class PlanEditor(QWidget):
             if obj.kind == "inherited_ira":
                 color = "#008300"
                 tip = f"Must be empty by {obj.deadline_year}" if obj.deadline_year else ""
-            bar = (y0, last, color, False)
+            bar = (y0, last, color, 0)
         elif key == "incomes":
             text = f"{obj.label(profile)}  {short_money(obj.amount)}"
             first = obj.start.resolve(profile) if obj.start else y0
             last = obj.end.resolve(profile) if obj.end else y1
-            bar = (first, last, INCOME_COLORS.get(obj.kind, color), False)
+            bar = (first, last, INCOME_COLORS.get(obj.kind, color), 0)
             tip = f"{first}–{last}" if first != last else str(first)
         elif key == "people":
             i = plan.people.index(obj)
@@ -874,7 +875,7 @@ class PlanEditor(QWidget):
             death = obj.death_age
             text = f"{p.name}: {claim_text}" + (f", to age {death}" if death else "")
             last = plan.death_year(i) or y1
-            bar = (first, last, color, False)
+            bar = (first, last, color, 0)
             tip = f"Social Security {first}–{last}"
         elif key == "rules":
             acct = plan.account(obj.account)
@@ -884,7 +885,7 @@ class PlanEditor(QWidget):
             verb = "Convert" if obj.kind == "roth_conversion" else "Withdraw from"
             text = f"{verb} {name}: {how}"
             first, last = obj.years(profile)
-            bar = (first, last, color if obj.kind == "roth_conversion" else "#6250d6", False)
+            bar = (first, last, color if obj.kind == "roth_conversion" else "#6250d6", 0)
             tip = obj.describe(profile, {a.id: a for a in plan.accounts}) + (f"\n{obj.note}" if obj.note else "")
         else:
             a = obj
@@ -903,7 +904,7 @@ class PlanEditor(QWidget):
             item.setCheckState(0, Qt.CheckState.Checked if obj.enabled else Qt.CheckState.Unchecked)
             if not obj.enabled:
                 item.setForeground(0, self.palette().placeholderText())
-                item.setData(1, BAR_ROLE, (bar[0], bar[1], "#c9c7c0", False) if bar else None)
+                item.setData(1, BAR_ROLE, (bar[0], bar[1], "#c9c7c0", 0) if bar else None)
             else:
                 item.setData(0, Qt.ItemDataRole.ForegroundRole, None)
 

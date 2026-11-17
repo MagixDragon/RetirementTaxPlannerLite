@@ -10,6 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "PySide6>=6.6",
+  # PySide6 6.12.0 drops a reference to True/False/None on every Python-side
+  # signal emit; Python 3.11 has no immortal objects, so a long session (or the
+  # test suite) crashes with "bool_dealloc". Python 3.12+ is unaffected.
+  "PySide6!=6.12.0; python_version < '3.12'",
   "matplotlib>=3.8",
 ]
 
