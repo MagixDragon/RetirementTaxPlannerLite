@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 from rtpl import __version__
 from rtpl.app.icon import about_pixmap
 from rtpl.app.inputs import ComboBox
+from rtpl.app.plan_editor import PlanEditor
 from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.app.side_panel import PanelHost, SidePanel
@@ -233,7 +234,15 @@ class MainWindow(QMainWindow):
         # Side panels: inputs on the left, graph options on the right. Each
         # can be pinned beside the graph or pop open over it.
         self.form = ProfileForm(self.library.available_states())
-        self.inputs_panel = SidePanel("Inputs", self.form, Qt.Edge.LeftEdge)
+        # On the Forward plan page the panel also lists the plan's items; the
+        # profile becomes its Baseline tab. Elsewhere only the profile shows.
+        self.plan_editor = PlanEditor()
+        self.input_tabs = QTabWidget()
+        self.input_tabs.setDocumentMode(True)
+        self.input_tabs.setTabBarAutoHide(True)
+        self.input_tabs.addTab(self.plan_editor, "&Plan items")
+        self.input_tabs.addTab(self.form, "&Baseline")
+        self.inputs_panel = SidePanel("Inputs", self.input_tabs, Qt.Edge.LeftEdge)
         # Center pages: the marginal graph, and the forward-looking plan
         self.plan_path: Path | None = None
         self.plan_view = PlanView(self.library)
@@ -270,6 +279,12 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self.recompute)
         self.form.changed.connect(self._schedule)
         self.form.changed.connect(self._mark_modified)
+        # Plan edits recalculate only the plan, a moment after the last change.
+        self._plan_timer = QTimer(self, singleShot=True, interval=250)
+        self._plan_timer.timeout.connect(self._recompute_plan)
+        self.plan_editor.changed.connect(self._plan_timer.start)
+        self.plan_editor.changed.connect(self._mark_modified)
+        self._sync_input_tabs()
 
         self._load_profile(self._starter_profile(), None)
         self.statusBar().showMessage("Ready")
@@ -365,6 +380,36 @@ class MainWindow(QMainWindow):
         name = "Forward plan options" if self.pages.widget(index) is self.plan_view else "Marginal graph options"
         self.options_panel.title.setText(f"<b>{name}</b>")
         self.options_panel.setAccessibleName(name)
+        if hasattr(self, "plan_editor"):
+            self._sync_input_tabs()
+
+    def _sync_input_tabs(self) -> None:
+        """Show the Plan items tab only on the Forward plan page with a plan open."""
+        show = self.pages.currentWidget() is self.plan_view and self.plan_view.plan is not None
+        was = self.input_tabs.isTabVisible(0)
+        self.input_tabs.setTabVisible(0, show)
+        if show and not was:
+            self.input_tabs.setCurrentIndex(0)
+        elif not show:
+            self.input_tabs.setCurrentIndex(1)
+        title = "Plan" if show else "Inputs"
+        self.inputs_panel.title.setText(f"<b>{title}</b>")
+        self.inputs_panel.setAccessibleName(title)
+        # Only the shown tab counts toward the panel's width.
+        for i in range(self.input_tabs.count()):
+            policy = QSizePolicy.Policy.Preferred if i == self.input_tabs.currentIndex() else QSizePolicy.Policy.Ignored
+            self.input_tabs.widget(i).setSizePolicy(policy, policy)
+        if hasattr(self, "panels"):
+            self.panels.refit(self.inputs_panel)
+
+    def _set_plan(self, plan: Plan | None) -> None:
+        self.plan_view.set_plan(plan)
+        self.plan_editor.set_plan(plan)
+        self._sync_input_tabs()
+
+    def _recompute_plan(self) -> None:
+        if self.plan_view.plan is not None:
+            self.plan_view.recompute()
 
     def _build_toolbar(self) -> None:
         bar = QToolBar("Panels")
@@ -532,6 +577,7 @@ class MainWindow(QMainWindow):
         self.redraw()
         if self.plan_view.plan is not None:
             self.plan_view.recompute(profile)
+            self.plan_editor.refresh()  # names and ages come from the baseline
         b = self.series.baseline
         self.statusBar().showMessage(
             f"Baseline: AGI ${b.agi:,.0f}, taxable income ${b.taxable_income:,.0f}, "
@@ -598,7 +644,8 @@ class MainWindow(QMainWindow):
         self.setWindowModified(True)
 
     def _update_title(self) -> None:
-        name = self.current_path.name if self.current_path else "Untitled"
+        path = self.plan_path if getattr(self, "plan_view", None) and self.plan_view.plan is not None else self.current_path
+        name = path.name if path else "Untitled"
         self.setWindowTitle(f"{name}[*] - {APP_NAME}")
 
     def _load_profile(self, profile: Profile, path: Path | None) -> None:
@@ -615,7 +662,7 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.warning(
             self,
             APP_NAME,
-            "The profile has unsaved changes. Save them?",
+            f"The {'plan' if self.plan_view.plan is not None else 'profile'} has unsaved changes. Save them?",
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel,
@@ -633,7 +680,7 @@ class MainWindow(QMainWindow):
 
     def new_profile(self) -> None:
         if self.maybe_save():
-            self.plan_view.set_plan(None)
+            self._set_plan(None)
             self._load_profile(self._starter_profile(), None)
 
     def open_profile(self) -> None:
@@ -654,10 +701,13 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             QMessageBox.warning(self, "Open", f"Could not open {path.name}:\n{exc}")
             return
-        self.plan_view.set_plan(None)
+        self._set_plan(None)
         self._load_profile(profile, path)
 
     def save_profile(self) -> bool:
+        """Save what is open: the plan when one is open, otherwise the profile."""
+        if self.plan_view.plan is not None:
+            return self.save_plan()
         if self.current_path is None:
             return self.save_profile_as()
         try:
@@ -687,16 +737,17 @@ class MainWindow(QMainWindow):
     def load_plan(self, plan: Plan, path: Path | None) -> None:
         """Show a plan; its profile becomes the profile on the left."""
         self.plan_path = path
-        self.plan_view.set_plan(plan)
+        self._set_plan(plan)
         self._load_profile(plan.profile, None)
         self.pages.setCurrentWidget(self.plan_view)
+        self._sync_input_tabs()
         self.recompute()
 
     def new_plan(self) -> None:
         self.load_plan(Plan.from_profile(self.form.profile()), None)
         self.statusBar().showMessage(
             "New plan from the profile: wages, pensions and Social Security carry forward. "
-            "Add accounts and rules in the plan file for now.", 8000)
+            "Add accounts and strategies on the Plan items tab.", 8000)
 
     def open_plan(self) -> None:
         if not self.maybe_save():
@@ -713,23 +764,34 @@ class MainWindow(QMainWindow):
             return
         self.load_plan(plan, Path(path) if "profile" in data else None)
 
-    def save_plan_as(self) -> None:
-        plan = self.plan_view.plan
-        if plan is None:
+    def save_plan(self) -> bool:
+        if self.plan_view.plan is None:
             QMessageBox.information(self, "Save Plan", "There is no plan to save yet.")
-            return
+            return False
+        if self.plan_path is None:
+            return self.save_plan_as()
+        plan = self.plan_view.plan
+        plan.profile = self.form.profile()
+        try:
+            plan.save(self.plan_path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save Plan", f"Could not save the plan:\n{exc}")
+            return False
+        self.setWindowModified(False)
+        self._update_title()
+        self.statusBar().showMessage(f"Saved {self.plan_path}", 4000)
+        return True
+
+    def save_plan_as(self) -> bool:
+        if self.plan_view.plan is None:
+            QMessageBox.information(self, "Save Plan", "There is no plan to save yet.")
+            return False
         start = str(self.plan_path) if self.plan_path else self._suggested_path(".plan.json")
         path, _ = QFileDialog.getSaveFileName(self, "Save Plan", start, "Plans (*.json)")
         if not path:
-            return
-        plan.profile = self.form.profile()
-        try:
-            plan.save(path)
-        except OSError as exc:
-            QMessageBox.warning(self, "Save Plan", f"Could not save the plan:\n{exc}")
-            return
+            return False
         self.plan_path = Path(path)
-        self.statusBar().showMessage(f"Saved {path}", 4000)
+        return self.save_plan()
 
     def export_chart(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

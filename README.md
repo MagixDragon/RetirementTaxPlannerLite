@@ -81,9 +81,13 @@ Linux, see [docs/packaging.md](docs/packaging.md).
 
 In the app, use **File > Open Plan** (try
 `examples/plans/couple_conversions_inherited.json`) or **File > New Plan
-from Profile**, then the **Forward plan** tab. For now, accounts, income
-streams and rules are edited in the plan's JSON file; an in-app editor is
-next. From the command line:
+from Profile**, then the **Forward plan** tab. The left panel's **Plan
+items** tab lists the accounts, income, Social Security, strategies (Roth
+conversions and withdrawals) and assumptions, each with a bar for the
+years it covers. Select one to change it in the form below the list, add
+or delete items, or untick one to see the plan without it; the graph and
+totals update as you type. **File > Save** saves the plan. From the
+command line:
 
 ```bash
 rtpl-plan plan.json -o income.png --balances balances.png --csv years.csv

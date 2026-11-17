@@ -181,6 +181,12 @@ class PanelHost(QObject):
             self.center.setFocus(Qt.FocusReason.OtherFocusReason)
         self.visibility_changed.emit(panel, open_)
 
+    def refit(self, panel: SidePanel) -> None:
+        """Re-measure a panel whose contents changed, widening it if needed."""
+        panel.fit_width()
+        if self._open[id(panel)]:
+            self._place(panel)
+
     def toggle(self, panel: SidePanel) -> None:
         self.set_open(panel, not self.is_open(panel))
 

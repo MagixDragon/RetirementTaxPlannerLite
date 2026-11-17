@@ -832,7 +832,8 @@ def _conversion_totals(conversions: dict[str, tuple[str, float]]) -> dict[str, f
 
 
 def run_plan(plan: Plan, library: TaxLawLibrary, **kw) -> PlanResult:
-    return PlanEngine(plan, library).run(**kw)
+    """Run the plan, leaving out anything the user switched off."""
+    return PlanEngine(plan.active(), library).run(**kw)
 
 
 # -- default visibility ----------------------------------------------------------

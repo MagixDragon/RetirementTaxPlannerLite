@@ -1,8 +1,9 @@
 """Forward plan page: income-by-source graph, balances graph and a year table.
 
-The plan's accounts, incomes and rules come from a plan file for now; the
-baseline (people, filing status, state) is the profile on the left, so
-edits there flow straight into the plan.
+The plan's items are edited on the Plan items tab of the left panel; the
+baseline (people, filing status, state) is the profile on its Baseline
+tab. Edits on either recalculate the plan, and the summary line says what
+the last change did to lifetime tax and final balances.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
@@ -42,6 +44,8 @@ class PlanView(QWidget):
         self.result: PlanResult | None = None
         self.palette: Palette | None = None
         self.overrides: dict[str, bool] = {}
+        self.last_totals: tuple[float, float] | None = None  # (lifetime tax, final balances)
+        self.last_change = ""  # what the last change that moved the totals did
         self.line_checks: dict[str, QCheckBox] = {}
 
         lay = QVBoxLayout(self)
@@ -101,6 +105,8 @@ class PlanView(QWidget):
     def set_plan(self, plan: Plan | None) -> None:
         self.plan = plan
         self.overrides.clear()
+        self.last_totals = None
+        self.last_change = ""
         if plan is None:
             self.result = None
             self.summary.setText("No plan loaded. Use File > Open Plan, or File > New Plan from Profile.")
@@ -136,16 +142,41 @@ class PlanView(QWidget):
         if r.years:
             first, last = r.years[0], r.years[-1]
             short = [y.year for y in r.years if y.shortfall > 0]
+            tax = sum(y.tax.total_tax for y in r.years)
+            final = sum(last.balances_end.values())
             text = (
                 f"<b>{self.plan.profile.name}</b>: {first.year}–{last.year}, "
                 f"{len(self.plan.accounts)} accounts, {len(self.plan.incomes)} income streams, "
-                f"{len(self.plan.rules)} rules. Lifetime federal + state tax "
-                f"${sum(y.tax.total_tax for y in r.years):,.0f}; final balances "
-                f"${sum(last.balances_end.values()):,.0f}."
+                f"{len(self.plan.rules)} strategies. Lifetime federal + state tax "
+                f"${tax:,.0f}; final balances ${final:,.0f}."
             )
             if short:
                 text += f" Spending not covered in {short[0]}–{short[-1]}."
+            # A recalculation that changes nothing keeps the last change's note.
+            self.last_change = self._change_text(tax, final) or self.last_change
+            if self.last_change:
+                text += "<br>" + self.last_change
+            self.last_totals = (tax, final)
             self.summary.setText(text)
+
+    def _change_text(self, tax: float, final: float) -> str:
+        """What the last change did, e.g. "Last change: tax −$36,351, final balances +$73,068"."""
+        if self.last_totals is None:
+            return ""
+        d_tax, d_final = tax - self.last_totals[0], final - self.last_totals[1]
+        if abs(d_tax) < 1 and abs(d_final) < 1:
+            return ""
+
+        def part(label: str, d: float, good_when_lower: bool) -> str:
+            if abs(d) < 1:
+                return f"{label} no change"
+            good = (d < 0) == good_when_lower
+            dark = self.palette is not None and QColor(self.palette.surface).lightness() < 128
+            color = ("#5fd39a" if dark else "#16794c") if good else ("#ff8a80" if dark else "#b42318")
+            sign = "+" if d > 0 else "\u2212"
+            return f"{label} <span style='color:{color}'><b>{sign}${abs(d):,.0f}</b></span>"
+
+        return "Last change: " + ", ".join((part("tax", d_tax, True), part("final balances", d_final, False)))
 
     def _rebuild_line_checks(self) -> None:
         assert self.result is not None
