@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from rtpl import __version__
 from rtpl.app.icon import about_pixmap
+from rtpl.app.inputs import ComboBox
 from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.app.side_panel import PanelHost, SidePanel
@@ -284,7 +285,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(6, 6, 6, 6)
         left = QFormLayout()
         left.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        self.source = QComboBox()
+        self.source = ComboBox()
         for s in IncomeSource:
             self.source.addItem(s.label[0].upper() + s.label[1:], s.value)
         self.source.setAccessibleName("Source of additional income")
@@ -299,7 +300,7 @@ class MainWindow(QMainWindow):
         xlabel = QLabel("Show up &to")
         xlabel.setBuddy(self.x_max)
         left.addRow(xlabel, self.x_max)
-        self.irmaa_basis = QComboBox()
+        self.irmaa_basis = ComboBox()
         self.irmaa_basis.addItem("Premiums 2 years out (projected)", "premium_year")
         self.irmaa_basis.addItem("This year's published brackets", "current_year")
         self.irmaa_basis.setAccessibleName("IRMAA brackets to show")
@@ -538,13 +539,15 @@ class MainWindow(QMainWindow):
         shown = [k for k in LAYERS if vis.get(k)]
         rows: list[tuple[float, str, str]] = []
         prev = None
-        for i, x in enumerate(s.x):
-            total = round(sum(s.layers[k][i] for k in shown), 4)
+        # Exact thresholds rather than chart steps, so no row shows a blend
+        # of the rates on either side of a threshold.
+        for bp in s.breakpoints():
+            total = round(sum(bp.rates[k] for k in shown), 4)
             if prev is None or abs(total - prev) > 1e-4:
                 parts = [
-                    f"{s.layer_label(k)} {s.layers[k][i]:.1%}" for k in shown if abs(s.layers[k][i]) > 1e-6
+                    f"{s.layer_label(k)} {bp.rates[k]:.1%}" for k in shown if abs(bp.rates[k]) > 1e-6
                 ]
-                rows.append((x, f"{total:.1%}", ", ".join(parts)))
+                rows.append((bp.x, f"{total:.1%}", ", ".join(parts)))
                 prev = total
         for a in s.annotations:
             if vis.get(a.kind):

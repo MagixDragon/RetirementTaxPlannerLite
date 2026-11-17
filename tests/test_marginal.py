@@ -1,3 +1,5 @@
+from itertools import pairwise
+
 import pytest
 
 from rtpl.engine.marginal import LAYERS, build_marginal_series, default_visibility
@@ -194,3 +196,65 @@ def test_washington_gains_tax_has_its_own_layer(lib):
     assert v["state_cg"] and not v["state"]
     ca = build_marginal_series(Profile.load("examples/profiles/retired_couple_ca.json"), lib, x_max=50_000)
     assert not default_visibility(ca)["state_cg"]
+
+
+def _blind_ssdi_couple():
+    # MFJ 2026: one spouse 60, blind, on SSDI; the other 52. SS fully 85% taxable.
+    return make(
+        fs="mfj",
+        state="WA",
+        people=[
+            Person(name="A", birth_year=1966, blind=True, social_security=43_955, ira_distributions=20_500),
+            Person(name="B", birth_year=1974),
+        ],
+        taxable_interest=1_904,
+        qualified_dividends=32_342,
+        nonqualified_dividends=1_160,
+        long_term_capital_gains=26_649,
+        short_term_capital_gains=5,
+        other_ordinary_income=2_034,
+        adjustments=1_000,
+        itemized_deductions=2_000,
+        has_taxable_brokerage=True,
+    )
+
+
+def test_breakpoints_are_exact_thresholds_not_blended_steps(lib):
+    s = build_marginal_series(_blind_ssdi_couple(), lib)
+    bps = s.breakpoints()
+    # Worked by hand: AGI 120,955.75 (SS taxable 37,361.75), deduction
+    # 32,200 + 1,650 blind = 33,850, taxable 87,105.75 of which 58,991 is
+    # gains and qualified dividends, so the ordinary part is 28,114.75.
+    expected = [
+        (0, 0.12),
+        (98_900 - 87_105.75, 0.27),  # gains start leaving the 0% band
+        (98_900 - 28_114.75, 0.12),  # all gains now at 15%
+        (100_800 - 28_114.75, 0.22),  # top of the 12% bracket
+        (250_000 - 120_955.75, 0.258),  # NIIT starts
+        (211_400 - 28_114.75, 0.278),  # 24% bracket
+        (250_000 + 62_060 - 120_955.75, 0.24),  # NIIT capped at investment income
+    ]
+    assert [(round(b.x), round(b.total, 4)) for b in bps] == [(round(x), r) for x, r in expected]
+    for b in bps:
+        assert b.x == pytest.approx(next(x for x, _ in expected if round(x) == round(b.x)), abs=0.02)
+    # No blended rates like 13.5% or 0.9% anywhere.
+    rates = {round(v, 4) for b in bps for v in b.rates.values()}
+    assert rates <= {0.0, 0.12, 0.15, 0.22, 0.24, 0.038}
+
+
+@pytest.mark.parametrize("name", ["retired_couple_ca", "early_retiree_aca", "ssdi_under_65"])
+@pytest.mark.parametrize("source", list(IncomeSource))
+def test_breakpoints_agree_with_the_steps(lib, name, source):
+    p = Profile.load(f"examples/profiles/{name}.json")
+    s = build_marginal_series(p, lib, source=source, x_max=250_000, step=100)
+    bps = s.breakpoints()
+    assert bps[0].x == 0
+    assert all(a.x < b.x for a, b in pairwise(bps))
+    # Any step that lies wholly between two breakpoints has exactly their rates.
+    for i, x0 in enumerate(s.x):
+        inside = [b for b in bps if b.x <= x0]
+        nxt = [b for b in bps if b.x > x0]
+        if nxt and nxt[0].x < x0 + s.step:
+            continue  # this step straddles a threshold
+        for k in LAYERS:
+            assert s.layers[k][i] == pytest.approx(inside[-1].rates[k], abs=1e-6)
