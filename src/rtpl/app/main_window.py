@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -621,16 +622,23 @@ class MainWindow(QMainWindow):
     def open_profile(self) -> None:
         if not self.maybe_save():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Open Profile", "", "Profiles (*.json)")
-        if not path:
-            return
+        path, _ = QFileDialog.getOpenFileName(self, "Open Profile or Plan", "", "Profiles and plans (*.json)")
+        if path:
+            self.open_file(Path(path))
+
+    def open_file(self, path: Path) -> None:
+        """Open a profile or a plan; a plan file is recognized by its "profile" section."""
         try:
-            profile = Profile.load(path)
-        except (OSError, ValueError, TypeError) as exc:
-            QMessageBox.warning(self, "Open Profile", f"Could not open the profile:\n{exc}")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "profile" in data:
+                self.load_plan(Plan.from_dict(data), path)
+                return
+            profile = Profile.from_dict(data)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            QMessageBox.warning(self, "Open", f"Could not open {path.name}:\n{exc}")
             return
         self.plan_view.set_plan(None)
-        self._load_profile(profile, Path(path))
+        self._load_profile(profile, path)
 
     def save_profile(self) -> bool:
         if self.current_path is None:
@@ -680,11 +688,13 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            plan = Plan.load(path)
-        except (OSError, ValueError, TypeError, KeyError) as exc:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            # A plain profile starts a new plan from it.
+            plan = Plan.from_dict(data) if "profile" in data else Plan.from_profile(Profile.from_dict(data))
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             QMessageBox.warning(self, "Open Plan", f"Could not open the plan:\n{exc}")
             return
-        self.load_plan(plan, Path(path))
+        self.load_plan(plan, Path(path) if "profile" in data else None)
 
     def save_plan_as(self) -> None:
         plan = self.plan_view.plan

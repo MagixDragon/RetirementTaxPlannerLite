@@ -194,3 +194,11 @@ def test_forward_plan_page_does_not_widen_window(window):
     window.load_plan(Plan.load(path), path)
     # The plan page's options scroll instead of setting a minimum width.
     assert window.plan_view.minimumSizeHint().width() <= window.tabs.minimumSizeHint().width() + 40
+
+
+def test_file_open_recognizes_plan_files(window):
+    window.open_file(Path("examples/plans/couple_conversions_inherited.json"))
+    assert window.plan_view.result is not None
+    assert window.pages.currentWidget() is window.plan_view
+    window.open_file(Path("examples/profiles/retired_couple_ca.json"))
+    assert window.plan_view.plan is None and window.form.profile().state == "CA"
