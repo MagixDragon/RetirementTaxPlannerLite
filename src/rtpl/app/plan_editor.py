@@ -52,8 +52,7 @@ from rtpl.model.plan import (
 )
 
 ROLE = Qt.ItemDataRole.UserRole  # (kind, object) of a row
-BAR_ROLE = Qt.ItemDataRole.UserRole + 1  # (first, last, color, milestone 0 or 1) for the bar column; no bools,
-# which PySide 6.12 on Python 3.11 loses references to when they pass through a QVariant
+BAR_ROLE = Qt.ItemDataRole.UserRole + 1  # (first, last, color, milestone 0 or 1) for the bar column
 
 GROUPS = (
     ("accounts", "Accounts"),
