@@ -126,6 +126,17 @@ def test_forward_plan_page(window):
     assert view.plan is not None and view.result is not None
 
 
+def test_graph_options_follow_active_page(window):
+    """The Graph options panel shows the options of whichever page is active."""
+    assert window.options_stack.currentIndex() == 0
+    assert "Marginal graph options" in window.options_panel.title.text()
+    window.pages.setCurrentWidget(window.plan_view)
+    assert window.options_stack.currentWidget() is window.plan_view.options_widget
+    assert "Forward plan options" in window.options_panel.title.text()
+    window.pages.setCurrentIndex(0)
+    assert "Marginal graph options" in window.options_panel.title.text()
+
+
 def test_window_fits_small_screens(window):
     """With both panels pinned, only the panels and the chart set the width."""
     for panel in (window.inputs_panel, window.options_panel):

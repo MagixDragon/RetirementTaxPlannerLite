@@ -12,13 +12,10 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
@@ -54,9 +51,13 @@ class PlanView(QWidget):
         self.summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(self.summary)
 
-        box = QGroupBox("Plan graph options")
-        blay = QHBoxLayout(box)
-        left = QVBoxLayout()
+        # The plan's graph options live in the Graph options side panel (the
+        # main window shows them while this page is active).
+        self.options_widget = QWidget()
+        olay = QVBoxLayout(self.options_widget)
+        olay.setContentsMargins(6, 6, 6, 6)
+        view = QGroupBox("View")
+        vlay = QVBoxLayout(view)
         self.detail = QCheckBox("Show each &source separately")
         self.detail.setToolTip("Split the bars by person, account and income stream instead of by type")
         self.todays = QCheckBox("In &today's dollars")
@@ -66,24 +67,19 @@ class PlanView(QWidget):
         self.tax_free.setToolTip("Roth, HSA and brokerage principal: money spent but not taxed")
         for cb in (self.detail, self.todays, self.tax_free):
             cb.toggled.connect(self.redraw)
-            left.addWidget(cb)
+            vlay.addWidget(cb)
+        olay.addWidget(view)
+        self.line_groups: dict[str, QVBoxLayout] = {}
+        for key, title in (("bracket", "Bracket tops"), ("irmaa", "IRMAA tiers (premiums 2 years later)"),
+                           ("other", "Other lines")):
+            group = QGroupBox(title)
+            self.line_groups[key] = QVBoxLayout(group)
+            olay.addWidget(group)
         reset = QPushButton("Reset &lines to suggested")
+        reset.setToolTip("Go back to the lines suggested by the plan")
         reset.clicked.connect(self._reset)
-        left.addWidget(reset)
-        left.addStretch(1)
-        blay.addLayout(left)
-        self.lines_grid = QGridLayout()
-        blay.addLayout(self.lines_grid, 1)
-        # The options scroll sideways on narrow windows instead of setting the
-        # window's minimum width, so the side panels still fit small screens.
-        self.options_scroll = QScrollArea()
-        self.options_scroll.setWidget(box)
-        self.options_scroll.setWidgetResizable(True)
-        self.options_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.options_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.options_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        lay.addWidget(self.options_scroll)
-        self._fit_options_height()
+        olay.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+        olay.addStretch(1)
 
         self.tabs = QTabWidget()
         self.income_fig = Figure(figsize=(9, 6), dpi=100)
@@ -150,25 +146,26 @@ class PlanView(QWidget):
         keys = list(self.result.line_labels)
         if list(self.line_checks) == keys:
             return
-        while self.lines_grid.count():
-            w = self.lines_grid.takeAt(0).widget()
-            if w:
-                w.deleteLater()
+        for lay in self.line_groups.values():
+            while lay.count():
+                w = lay.takeAt(0).widget()
+                if w:
+                    w.deleteLater()
         self.line_checks.clear()
-        cols = 4
-        for n, key in enumerate(keys):
-            cb = QCheckBox(line_short_label(key) if not key.startswith("bracket:") else f"Top of {line_short_label(key)}")
-            cb.setToolTip(self.result.line_labels[key])
-            cb.setAccessibleName(self.result.line_labels[key])
+        for key in keys:
+            label = self.result.line_labels[key]
+            if key.startswith("bracket:"):
+                group, text = "bracket", f"Top of {line_short_label(key)}"
+            elif key.startswith("irmaa:"):
+                group, text = "irmaa", f"Tier {key.split(':')[1]}"
+            else:
+                group, text = "other", label
+            cb = QCheckBox(text)
+            cb.setToolTip(label)
+            cb.setAccessibleName(label)
             cb.clicked.connect(lambda checked, k=key: self._toggled(k, checked))
             self.line_checks[key] = cb
-            self.lines_grid.addWidget(cb, n // cols, n % cols)
-        self._fit_options_height()
-
-    def _fit_options_height(self) -> None:
-        box = self.options_scroll.widget()
-        bar = self.options_scroll.horizontalScrollBar().sizeHint().height()
-        self.options_scroll.setFixedHeight(box.sizeHint().height() + bar)
+            self.line_groups[group].addWidget(cb)
 
     def visibility(self) -> dict[str, bool]:
         assert self.result is not None
