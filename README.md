@@ -84,7 +84,8 @@ In the app, use **File > Open Plan** (try
 from Profile**, then the **Forward plan** tab. The left panel's **Plan
 items** tab lists the accounts, income, Social Security, strategies (Roth
 conversions and withdrawals) and assumptions, each with a bar for the
-years it covers. Select one to change it in the form below the list, add
+years it covers, under a **Plan name** for this version of the plan ("Roth
+conversions until Social Security"). Select one to change it in the form below the list, add
 or delete items, or untick one to see the plan without it; the graph and
 totals update as you type. **File > Save** saves the plan. From the
 command line:

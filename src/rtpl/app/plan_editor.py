@@ -749,6 +749,17 @@ class PlanEditor(QWidget):
         row.addWidget(self.dup_btn)
         row.addWidget(self.del_btn)
         row.addStretch(1)
+        name_row = QHBoxLayout()
+        name_label = QLabel("Plan &name")
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("e.g. Roth conversions until Social Security")
+        self.name.setToolTip("A name for this version of the plan; it is part of the suggested file name")
+        self.name.setAccessibleName("Plan name")
+        name_label.setBuddy(self.name)
+        self.name.textEdited.connect(self._name_edited)
+        name_row.addWidget(name_label)
+        name_row.addWidget(self.name, 1)
+        lay.addLayout(name_row)
         lay.addLayout(row)
 
         self.tree = QTreeWidget()
@@ -792,7 +803,14 @@ class PlanEditor(QWidget):
     # -- building the list -------------------------------------------------
     def set_plan(self, plan: Plan | None) -> None:
         self.plan = plan
+        self.name.setText(plan.name if plan else "")
+        self.name.setEnabled(plan is not None)
         self.rebuild()
+
+    def _name_edited(self, text: str) -> None:
+        if self.plan is not None:
+            self.plan.name = text.strip()
+            self.changed.emit()
 
     def rebuild(self, select=None) -> None:
         """Fill the list from the plan, keeping (or moving to) a selection."""

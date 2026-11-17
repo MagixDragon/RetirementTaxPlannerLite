@@ -240,6 +240,7 @@ class Rule:
 @dataclass
 class Plan:
     profile: Profile
+    name: str = ""  # the plan's own name, e.g. "Roth conversions until Social Security"
     people: list[PersonPlan] = field(default_factory=list)
     accounts: list[Account] = field(default_factory=list)
     incomes: list[IncomeStream] = field(default_factory=list)
@@ -276,6 +277,12 @@ class Plan:
             dy = self.death_year(i)
             last = max(last, dy if dy is not None else p.birth_year + self.assumptions.end_age)
         return last
+
+    @property
+    def title(self) -> str:
+        """Baseline name and plan name, e.g. "Smith household - Roth conversions until SS"."""
+        parts = [p for p in (self.profile.name.strip(), self.name.strip()) if p]
+        return " - ".join(parts) or "Plan"
 
     def active(self) -> "Plan":
         """The plan without the accounts, income streams and rules the user
@@ -354,8 +361,8 @@ class Plan:
             r["end"] = When.from_dict(r.get("end"))
             rules.append(Rule(**r))
         assumptions = Assumptions(**data.get("assumptions", {}))
-        return cls(profile=profile, people=people, accounts=accounts, incomes=incomes,
-                   rules=rules, assumptions=assumptions)
+        return cls(profile=profile, name=data.get("name", ""), people=people, accounts=accounts,
+                   incomes=incomes, rules=rules, assumptions=assumptions)
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")

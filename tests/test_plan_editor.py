@@ -222,3 +222,28 @@ def test_new_plan_from_profile_can_be_built_in_the_app(window):
     ed.add_item("roth_conversion")
     window._plan_timer.timeout.emit()
     assert window.plan_view.result.years[0].category_totals()["roth_conversion"] > 0
+
+
+def test_plan_name_round_trips_and_titles(tmp_path):
+    plan = Plan.load(PLAN)
+    assert plan.name == "" and plan.title == plan.profile.name
+    plan.name = "Roth conversions until SS"
+    assert plan.title == "Couple with conversions and an inherited IRA - Roth conversions until SS"
+    plan.save(tmp_path / "p.json")
+    assert Plan.load(tmp_path / "p.json").name == "Roth conversions until SS"
+
+
+def test_plan_name_field_and_suggested_file_name(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    window.setWindowModified(False)
+    ed.name.setText("David retires early")
+    ed.name.textEdited.emit("David retires early")  # as if typed
+    assert plan.name == "David retires early" and window.isWindowModified()
+    window.plan_path = None
+    window.form.plan_name.setText("Smith: household")
+    window.form.changed.emit()
+    path = Path(window._suggested_plan_path(".plan.json"))
+    assert path.name == "Smith_ household - David retires early.plan.json"
+    window._plan_timer.timeout.emit()
+    assert "David retires early" in window.plan_view.summary.text()

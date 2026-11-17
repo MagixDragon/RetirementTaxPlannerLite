@@ -8,6 +8,8 @@ the last change did to lifetime tax and final balances.
 
 from __future__ import annotations
 
+from html import escape
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Signal
@@ -145,7 +147,7 @@ class PlanView(QWidget):
             tax = sum(y.tax.total_tax for y in r.years)
             final = sum(last.balances_end.values())
             text = (
-                f"<b>{self.plan.profile.name}</b>: {first.year}–{last.year}, "
+                f"<b>{escape(self.plan.title)}</b>: {first.year}–{last.year}, "
                 f"{len(self.plan.accounts)} accounts, {len(self.plan.incomes)} income streams, "
                 f"{len(self.plan.rules)} strategies. Lifetime federal + state tax "
                 f"${tax:,.0f}; final balances ${final:,.0f}."

@@ -724,6 +724,14 @@ class MainWindow(QMainWindow):
         folder = self.current_path.parent if self.current_path else Path.home()
         return str(folder / (safe_file_stem(self.form.plan_name.text()) + suffix))
 
+    def _suggested_plan_path(self, suffix: str) -> str:
+        """Baseline name plus the plan's own name, e.g. "Smith - Roth until SS.plan.json"."""
+        plan = self.plan_view.plan
+        assert plan is not None
+        plan.profile = self.form.profile()
+        folder = (self.plan_path or self.current_path or Path.home() / "x").parent
+        return str(folder / (safe_file_stem(plan.title, "plan") + suffix))
+
     def save_profile_as(self) -> bool:
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Profile", self._suggested_path(".json"), "Profiles (*.json)"
@@ -786,7 +794,7 @@ class MainWindow(QMainWindow):
         if self.plan_view.plan is None:
             QMessageBox.information(self, "Save Plan", "There is no plan to save yet.")
             return False
-        start = str(self.plan_path) if self.plan_path else self._suggested_path(".plan.json")
+        start = str(self.plan_path) if self.plan_path else self._suggested_plan_path(".plan.json")
         path, _ = QFileDialog.getSaveFileName(self, "Save Plan", start, "Plans (*.json)")
         if not path:
             return False
@@ -795,7 +803,9 @@ class MainWindow(QMainWindow):
 
     def export_chart(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Chart", self._suggested_path(".png"), "PNG image (*.png);;SVG image (*.svg);;PDF (*.pdf)"
+            self, "Export Chart",
+            self._suggested_plan_path(".png") if self.pages.currentWidget() is self.plan_view and self.plan_view.plan
+            else self._suggested_path(".png"), "PNG image (*.png);;SVG image (*.svg);;PDF (*.pdf)"
         )
         if path:
             fig = self.plan_view.current_figure() if self.pages.currentWidget() is self.plan_view else self.figure

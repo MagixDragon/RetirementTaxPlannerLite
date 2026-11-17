@@ -216,6 +216,9 @@ final balances.
   tick box. An unticked item stays in the plan file (`"enabled": false`)
   but is left out of the calculation, along with any strategy on an
   unticked account, so a what-if is one click and one click back.
+* **Plan name.** A plan has its own free-form name beside the baseline's
+  name; the summary, chart titles and the suggested file name use both
+  ("Smith household - Roth conversions until SS.plan.json").
 * **Timings** are entered as a person's age or a calendar year, and the
   form shows the other form next to it ("= 2031").
 * **Account ids** are made up by the app (`p1_traditional_ira`); deleting
