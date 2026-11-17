@@ -137,6 +137,19 @@ def test_graph_options_follow_active_page(window):
     assert "Marginal graph options" in window.options_panel.title.text()
 
 
+def test_empty_plan_page_uses_theme_background(window):
+    """Before any plan is loaded the blank charts take the theme's background."""
+    from matplotlib.colors import to_hex
+
+    window.recompute()  # the default profile's first draw passes the palette on
+    view = window.plan_view
+    assert view.result is None
+    dark = window.theme.palette("dark")
+    view.set_palette(dark)
+    assert to_hex(view.income_fig.get_facecolor()) == to_hex(dark.surface)
+    assert to_hex(view.bal_fig.get_facecolor()) == to_hex(dark.surface)
+
+
 def test_window_fits_small_screens(window):
     """With both panels pinned, only the panels and the chart set the width."""
     for panel in (window.inputs_panel, window.options_panel):

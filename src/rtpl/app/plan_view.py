@@ -104,10 +104,16 @@ class PlanView(QWidget):
         if plan is None:
             self.result = None
             self.summary.setText("No plan loaded. Use File > Open Plan, or File > New Plan from Profile.")
-            for fig, canvas in ((self.income_fig, self.income_canvas), (self.bal_fig, self.bal_canvas)):
-                fig.clear()
-                canvas.draw_idle()
             self.table.setRowCount(0)
+            self._paint_empty()
+
+    def _paint_empty(self) -> None:
+        """Blank charts in the theme's background, so dark mode has no white page."""
+        for fig, canvas in ((self.income_fig, self.income_canvas), (self.bal_fig, self.bal_canvas)):
+            fig.clear()
+            if self.palette is not None:
+                fig.set_facecolor(self.palette.surface)
+            canvas.draw_idle()
 
     def recompute(self, profile: Profile | None = None) -> None:
         if self.plan is None:
@@ -185,6 +191,8 @@ class PlanView(QWidget):
     # -- drawing ---------------------------------------------------------
     def set_palette(self, palette: Palette) -> None:
         self.palette = palette
+        if self.result is None:
+            self._paint_empty()
         self.redraw()
 
     def redraw(self, *_args) -> None:
