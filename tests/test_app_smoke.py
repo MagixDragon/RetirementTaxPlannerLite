@@ -108,6 +108,24 @@ def test_inflation_and_irmaa_basis_controls(window):
     assert irmaa and "published thresholds" in irmaa[0].detail
 
 
+def test_forward_plan_page(window):
+    from rtpl.model.plan import Plan
+
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    view = window.plan_view
+    assert view.result is not None and view.result.years
+    assert window.form.profile().state == "NC"
+    assert view.table.rowCount() == len(view.result.years)
+    assert view.line_checks["bracket:0.22"].isChecked()
+    view.line_checks["bracket:0.22"].click()  # user hides the 22% line
+    assert view.visibility()["bracket:0.22"] is False
+    view.detail.setChecked(True)
+    view.todays.setChecked(True)
+    window.new_plan()
+    assert view.plan is not None and view.result is not None
+
+
 def test_window_fits_small_screens(window):
     """With both panels pinned, only the panels and the chart set the width."""
     for panel in (window.inputs_panel, window.options_panel):
@@ -167,3 +185,20 @@ def test_auto_hide_check_box_shows_state(window):
     assert not inputs.auto_hide.isChecked() and inputs.auto_hide.text() == "Auto hide"
     inputs.auto_hide.click()
     assert not panels.is_pinned(inputs) and inputs.parent() is window.centralWidget()
+
+
+def test_forward_plan_page_does_not_widen_window(window):
+    from rtpl.model.plan import Plan
+
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    # The plan page's options scroll instead of setting a minimum width.
+    assert window.plan_view.minimumSizeHint().width() <= window.tabs.minimumSizeHint().width() + 40
+
+
+def test_file_open_recognizes_plan_files(window):
+    window.open_file(Path("examples/plans/couple_conversions_inherited.json"))
+    assert window.plan_view.result is not None
+    assert window.pages.currentWidget() is window.plan_view
+    window.open_file(Path("examples/profiles/retired_couple_ca.json"))
+    assert window.plan_view.plan is None and window.form.profile().state == "CA"

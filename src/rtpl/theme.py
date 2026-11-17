@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
@@ -20,6 +20,8 @@ class Palette:
     irmaa: str
     aca: str
     layers: dict[str, str]
+    sources: dict[str, str] = field(default_factory=dict)  # forward graph income categories
+    lines: dict[str, str] = field(default_factory=dict)  # forward graph threshold lines
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -81,6 +83,8 @@ class Theme:
             irmaa=d["irmaa"],
             aca=d["aca"],
             layers=self.layer_colors(mode),
+            sources=dict(d.get("sources", {})),
+            lines=dict(d.get("lines", {})),
         )
 
     def set_layer_color(self, mode: str, layer: str, color: str) -> None:
@@ -96,7 +100,9 @@ class Theme:
             d = self.raw[mode]
             lines.append(f"[{mode}]")
             lines += [f'{k} = "{v}"' for k, v in d.items() if not isinstance(v, dict)]
-            lines += ["", f"[{mode}.layers]"]
-            lines += [f'{k} = "{v}"' for k, v in d["layers"].items()]
+            for sub, table in d.items():
+                if isinstance(table, dict):
+                    lines += ["", f"[{mode}.{sub}]"]
+                    lines += [f'{k} = "{v}"' for k, v in table.items()]
             lines.append("")
         return "\n".join(lines)

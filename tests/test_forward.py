@@ -1,0 +1,261 @@
+"""Forward-looking plan: RMD tables, Social Security, rules and the year loop."""
+
+from pathlib import Path
+
+import pytest
+
+from rtpl.engine import social_security as ssa
+from rtpl.engine.forward import PlanEngine, default_line_visibility, run_plan, year_table
+from rtpl.engine.rmd import default_tables, rmd_start_age
+from rtpl.model.plan import Account, Assumptions, IncomeStream, Plan, PersonPlan, Rule, SocialSecurity, When
+from rtpl.model.profile import Household, Person, Profile
+
+EXAMPLE = Path("examples/plans/couple_conversions_inherited.json")
+
+
+def couple(year=2026, births=(1956, 1958), **household):
+    return Profile(
+        year=year, filing_status="mfj",
+        people=[Person(name="A", birth_year=births[0]), Person(name="B", birth_year=births[1])],
+        household=Household(**household),
+    )
+
+
+def single(year=2026, birth=1951):
+    return Profile(year=year, filing_status="single", people=[Person(name="A", birth_year=birth)])
+
+
+# -- tables -----------------------------------------------------------------------
+
+
+def test_rmd_tables():
+    t = default_tables()
+    assert t.uniform_period(73) == 26.5
+    assert t.uniform_period(130) == 2.0  # 120 and older
+    assert t.single_period(60) == 27.1
+    # The derived joint table reproduces the Uniform Lifetime table (10-year gap) to 0.1 year.
+    for age in range(72, 100):
+        assert abs(t.joint_period(age, age - 10) - t.uniform_period(age)) <= 0.11
+    # A much younger spouse gives a longer period than the uniform table.
+    assert t.owner_period(75, 55, True) > t.uniform_period(75) + 5
+    assert t.owner_period(75, 55, False) == t.uniform_period(75)
+    assert t.owner_period(75, 70, True) == t.uniform_period(75)
+
+
+def test_rmd_start_age():
+    assert rmd_start_age(1950) == 72
+    assert rmd_start_age(1951) == 73
+    assert rmd_start_age(1959) == 73
+    assert rmd_start_age(1960) == 75
+
+
+def test_social_security_factors():
+    assert ssa.full_retirement_age(1960) == 67
+    assert ssa.full_retirement_age(1957) == pytest.approx(66.5)
+    assert ssa.own_benefit_factor(1960, 62) == pytest.approx(0.70)
+    assert ssa.own_benefit_factor(1960, 70) == pytest.approx(1.24)
+    assert ssa.own_benefit_factor(1960, 67) == pytest.approx(1.0)
+    assert ssa.spousal_factor(1960, 62) == pytest.approx(0.65)
+    assert ssa.spousal_factor(1960, 68) == 1.0
+    assert ssa.survivor_amount(30000, 21000) == pytest.approx(24750)  # 82.5% floor
+    assert ssa.survivor_amount(30000, None) == 30000
+
+
+# -- engine -------------------------------------------------------------------------
+
+
+def test_rmd_uniform_first_year(lib):
+    plan = Plan(profile=single(), accounts=[Account(id="ira", kind="traditional_ira", balance=1_000_000)])
+    res = run_plan(plan, lib, with_lines=False)
+    y0 = res.years[0]
+    assert y0.ages[0] == 75
+    rmd = y0.category_totals()["rmd"]
+    assert rmd == pytest.approx(1_000_000 / 24.6)
+    # The balance after the RMD grows at the default return.
+    assert y0.balances_end["ira"] == pytest.approx((1_000_000 - rmd) * 1.05)
+
+
+def test_rmd_joint_table_for_younger_spouse(lib):
+    prof = couple(births=(1951, 1970))
+    plan = Plan(profile=prof, accounts=[Account(id="ira", kind="traditional_ira", owner=0, balance=1_000_000)])
+    rmd = run_plan(plan, lib, with_lines=False).years[0].category_totals()["rmd"]
+    assert rmd == pytest.approx(1_000_000 / default_tables().joint_period(75, 56))
+    assert rmd < 1_000_000 / 24.6
+
+
+def test_inherited_ira_ten_year_rule_and_spread(lib):
+    prof = single(birth=1970)
+    acct = Account(id="inh", kind="inherited_ira", owner=0, balance=500_000, inherited_year=2024,
+                   original_owner_birth_year=1940, owner_started_rmds=True)
+    plan = Plan(profile=prof, accounts=[acct], assumptions=Assumptions(end_age=70, return_rate=0.0))
+    res = run_plan(plan, lib, with_lines=False)
+    by_year = {y.year: y for y in res.years}
+    # RMD years 2025+: Single Life at the beneficiary's age in 2025 (55 -> 31.6), less one per year.
+    assert by_year[2026].category_totals()["inherited"] == pytest.approx(500_000 / 30.6)
+    assert by_year[2034].balances_end["inh"] == pytest.approx(0.0)
+    assert any("10-year deadline" in n for n in by_year[2034].notes)
+
+    # 1/N over the final 4 years: equal withdrawals when returns are zero.
+    plan.rules = [Rule(kind="withdrawal", account="inh", start=When(year=2031), end=When(year=2034), mode="spread")]
+    res = run_plan(plan, lib, with_lines=False)
+    amounts = [y.category_totals()["inherited"] for y in res.years if 2031 <= y.year <= 2034]
+    assert max(amounts) - min(amounts) < 1.0
+
+
+def test_one_year_rule_overrides_range(lib):
+    prof = single(birth=1964)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="ira", kind="traditional_ira", balance=800_000)],
+        rules=[
+            Rule(kind="roth_conversion", account="ira", start=When(age=62), end=When(age=66), mode="fixed", amount=50_000),
+            Rule(kind="roth_conversion", account="ira", start=When(year=2028), mode="fixed", amount=0),
+        ],
+        assumptions=Assumptions(end_age=68),
+    )
+    conv = {y.year: y.category_totals()["roth_conversion"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert conv[2026] == 50_000 and conv[2027] == 50_000
+    assert conv[2028] == 0
+    assert conv[2029] == 50_000 and conv[2030] == 50_000
+    assert conv[2031] == 0  # after the range
+
+
+def test_fill_to_bracket_top_and_line_matches(lib):
+    prof = couple(births=(1962, 1963))
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="ira", kind="traditional_ira", owner=0, balance=2_000_000)],
+        incomes=[IncomeStream(kind="pension", amount=30_000, owner=0)],
+        rules=[Rule(kind="roth_conversion", account="ira", start=When(year=2026), end=When(year=2028),
+                    mode="fill", target="bracket:0.22")],
+        assumptions=Assumptions(end_age=67),
+    )
+    res = run_plan(plan, lib)
+    for y in res.years[:3]:
+        top = [b for b, r in y.law.ordinary["mfj"].brackets if r == 0.24][0]
+        ordinary_taxable = y.tax.taxable_income - y.tax.preferential_income
+        assert ordinary_taxable == pytest.approx(top, abs=2.0)
+        # The 22% line sits at the top of the bar.
+        assert y.lines["bracket:0.22"] == pytest.approx(y.taxable_bar, abs=10.0)
+    assert res.years[3].category_totals()["roth_conversion"] == 0
+    # Conversions land in an automatically created Roth IRA.
+    assert any(k.startswith("_roth") for k in res.years[0].balances_end)
+
+
+def test_social_security_spousal_and_survivor(lib):
+    prof = couple(births=(1960, 1960))
+    plan = Plan(
+        profile=prof,
+        people=[
+            PersonPlan(social_security=SocialSecurity(fra_benefit=40_000, claim_age=67), death_age=80),
+            PersonPlan(social_security=SocialSecurity(fra_benefit=0, claim_age=67)),
+        ],
+        incomes=[IncomeStream(kind="pension", amount=20_000, owner=0, survivor_pct=0.5)],
+        assumptions=Assumptions(ss_cola=0.0, end_age=82),
+    )
+    by_year = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    y67 = by_year[2027]
+    assert y67.category_totals()["ss"] == pytest.approx(40_000 + 20_000)  # own + 50% spousal
+    assert by_year[2040].filing_status == "mfj"  # year of death: still joint
+    after = by_year[2041]
+    assert after.filing_status == "single"
+    assert after.category_totals()["ss"] == pytest.approx(40_000)  # survivor steps up
+    assert after.category_totals()["pension"] == pytest.approx(10_000)
+
+
+def test_spousal_reduced_when_early(lib):
+    prof = couple(births=(1964, 1964))
+    plan = Plan(
+        profile=prof,
+        people=[
+            PersonPlan(social_security=SocialSecurity(fra_benefit=40_000, claim_age=62)),
+            PersonPlan(social_security=SocialSecurity(fra_benefit=10_000, claim_age=62)),
+        ],
+        assumptions=Assumptions(ss_cola=0.0, end_age=63),
+    )
+    y62 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y62.ages[0] == 62
+    own = 40_000 * 0.7 + 10_000 * 0.7
+    spousal = (20_000 - 10_000) * 0.65
+    assert y62.category_totals()["ss"] == pytest.approx(own + spousal)
+
+
+def test_deficit_sells_brokerage_and_realizes_gains(lib):
+    prof = single(birth=1960)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="brk", kind="taxable", owner=None, balance=500_000, cost_basis=250_000)],
+        assumptions=Assumptions(spending=60_000, end_age=68, return_rate=0.0),
+    )
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    ct = y0.category_totals()
+    assert ct["principal"] + ct["realized_gains"] == pytest.approx(60_000 + y0.tax.total_tax, abs=2)
+    assert ct["realized_gains"] == pytest.approx(ct["principal"], rel=1e-6)
+    assert ct["dividends"] == 0  # no yields set on this account  # half the balance is gain
+
+
+def test_example_plan_runs_and_round_trips(lib, tmp_path):
+    plan = Plan.load(EXAMPLE)
+    res = run_plan(plan, lib)
+    assert res.years[0].year == 2026 and res.years[-1].year == 2060
+    assert all(y.shortfall == 0 for y in res.years)
+    vis = default_line_visibility(res)
+    assert vis["bracket:0.22"] and vis["cg0"] and not vis["aca:4"]
+    header, rows = year_table(res)
+    assert len(rows) == len(res.years) and header[0] == "Year"
+    out = tmp_path / "plan.json"
+    plan.save(out)
+    again = Plan.load(out)
+    assert again.to_dict() == plan.to_dict()
+
+
+def test_plan_validation():
+    plan = Plan(profile=single(), accounts=[Account(id="x", kind="bogus")],
+                rules=[Rule(kind="roth_conversion", account="nope", start=When(year=2026), mode="fill")])
+    problems = plan.validate()
+    assert any("unknown kind" in p for p in problems)
+    assert any("no account" in p for p in problems)
+    assert any("target" in p for p in problems)
+    with pytest.raises(ValueError):
+        PlanEngine(plan, None)
+
+
+def test_plan_cli(tmp_path):
+    from rtpl.plan_cli import main
+
+    out, bal, csv_path = tmp_path / "i.png", tmp_path / "b.svg", tmp_path / "y.csv"
+    assert main([str(EXAMPLE), "-o", str(out), "--balances", str(bal), "--csv", str(csv_path),
+                 "--detail", "--todays-dollars", "--line", "bracket:0.32"]) == 0
+    assert out.stat().st_size > 10_000 and bal.stat().st_size > 10_000
+    assert csv_path.read_text(encoding="utf-8").startswith("Year,")
+
+
+def test_from_profile_carries_income():
+    prof = couple()
+    prof.people[0].social_security = 30_000
+    prof.people[1].pension = 12_000
+    plan = Plan.from_profile(prof)
+    assert plan.people[0].social_security.current_benefit == 30_000
+    assert [s.kind for s in plan.incomes] == ["pension"]
+
+
+def test_ssdi_suspend_at_fra_until_70(lib):
+    prof = single(birth=1966)
+    plan = Plan(profile=prof, people=[PersonPlan(social_security=SocialSecurity(
+        fra_benefit=30_000, claim_age=70, ssdi=True))], assumptions=Assumptions(ss_cola=0.0, end_age=72))
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[60] == pytest.approx(30_000) and ss[66] == pytest.approx(30_000)  # SSDI at the full benefit
+    assert ss[67] == 0 and ss[69] == 0  # suspended from full retirement age
+    assert ss[70] == pytest.approx(30_000 * 1.24)  # restarts with 36 months of delayed credits
+
+
+def test_ssdi_default_continues_and_early_end(lib):
+    prof = single(birth=1966)
+    plan = Plan(profile=prof, people=[PersonPlan(social_security=SocialSecurity(
+        fra_benefit=30_000, claim_age=67, ssdi=True))], assumptions=Assumptions(ss_cola=0.0, end_age=69))
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[66] == ss[67] == ss[68] == pytest.approx(30_000)
+    plan.people[0].social_security = SocialSecurity(fra_benefit=30_000, claim_age=62, ssdi=True, ssdi_end_age=61)
+    ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
+    assert ss[60] == pytest.approx(30_000) and ss[61] == 0
+    assert ss[62] == pytest.approx(21_000)  # ordinary early claim afterwards

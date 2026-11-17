@@ -18,6 +18,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 rtpl-chart = "rtpl.cli:main"
+rtpl-plan = "rtpl.plan_cli:main"
 rtpl-shortcut = "rtpl.app.shortcut:main"
 
 [project.gui-scripts]
