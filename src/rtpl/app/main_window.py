@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from rtpl import __version__
 from rtpl.app.icon import about_pixmap
+from rtpl.app.inputs import ComboBox
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.app.side_panel import PanelHost, SidePanel
 from rtpl.charts.marginal_chart import render_marginal
@@ -275,7 +276,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(6, 6, 6, 6)
         left = QFormLayout()
         left.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        self.source = QComboBox()
+        self.source = ComboBox()
         for s in IncomeSource:
             self.source.addItem(s.label[0].upper() + s.label[1:], s.value)
         self.source.setAccessibleName("Source of additional income")
@@ -290,7 +291,7 @@ class MainWindow(QMainWindow):
         xlabel = QLabel("Show up &to")
         xlabel.setBuddy(self.x_max)
         left.addRow(xlabel, self.x_max)
-        self.irmaa_basis = QComboBox()
+        self.irmaa_basis = ComboBox()
         self.irmaa_basis.addItem("Premiums 2 years out (projected)", "premium_year")
         self.irmaa_basis.addItem("This year's published brackets", "current_year")
         self.irmaa_basis.setAccessibleName("IRMAA brackets to show")
