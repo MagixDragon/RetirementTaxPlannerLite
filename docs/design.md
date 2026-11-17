@@ -280,8 +280,10 @@ account, so an RMD counts toward it; conversions come on top of RMDs.
 **Income and brackets.** Bars are income by source, in this stack order:
 Social Security, wages, pensions and annuities (including foreign
 pensions), interest and other ordinary income, RMDs, inherited IRA
-withdrawals, other IRA withdrawals, Roth conversions, capital gains and
-qualified dividends, then tax-free money (tax-exempt interest, Roth and
+withdrawals, other IRA withdrawals, Roth conversions, qualified dividends
+and fund distributions (income a taxable account pays whether you want it
+or not), realized capital gains (sales you choose, sales that cover a
+shortfall, and one-off gains such as a property sale), then tax-free money (tax-exempt interest, Roth and
 HSA withdrawals, brokerage and cash principal) in light hatched grays that
 can be switched off.
 

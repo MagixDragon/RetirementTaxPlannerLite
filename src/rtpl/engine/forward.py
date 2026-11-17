@@ -49,12 +49,17 @@ CATEGORIES = (
     "inherited",
     "ira_withdrawal",
     "roth_conversion",
-    "cg_qd",
+    "dividends",
+    "realized_gains",
     "tax_exempt",
     "roth_withdrawal",
     "principal",
 )
 TAX_FREE = ("tax_exempt", "roth_withdrawal", "principal")
+# Taxed at capital gains rates, stacked above ordinary income. Dividends and
+# fund distributions come whether you want them or not; realized gains are
+# from sales you choose (or that pay for a shortfall) and one-off gains.
+PREFERENTIAL = ("dividends", "realized_gains")
 
 CATEGORY_LABELS = {
     "ss": "Social Security",
@@ -65,7 +70,8 @@ CATEGORY_LABELS = {
     "inherited": "Inherited IRA withdrawals",
     "ira_withdrawal": "Other IRA / 401(k) withdrawals",
     "roth_conversion": "Roth conversions",
-    "cg_qd": "Capital gains and qualified dividends",
+    "dividends": "Qualified dividends and fund distributions",
+    "realized_gains": "Realized capital gains (sales)",
     "tax_exempt": "Tax-exempt interest",
     "roth_withdrawal": "Roth and HSA withdrawals (tax-free)",
     "principal": "Brokerage and cash principal (tax-free)",
@@ -515,10 +521,10 @@ class PlanEngine:
                     sources.append(Source("other_ordinary", key, label, amt))
                 elif s.kind == "qualified_dividends":
                     y.add("qualified_div", owner, taxable)
-                    sources.append(Source("cg_qd", key, label, amt))
+                    sources.append(Source("dividends", key, label, amt))
                 elif s.kind == "ltcg":
                     y.add("ltcg", owner, taxable)
-                    sources.append(Source("cg_qd", key, label, amt))
+                    sources.append(Source("realized_gains", key, label, amt))
                 elif s.kind == "tax_exempt":
                     y.add("tax_exempt", owner, amt)
                     sources.append(Source("tax_exempt", key, label, amt))
@@ -544,9 +550,9 @@ class PlanEngine:
                 y.qualified_div += qd
                 y.ltcg += cgd
                 if interest:
-                    sources.append(Source("other_ordinary", f"yield:{a.id}", f"{labels[a.id]} interest", interest))
+                    sources.append(Source("other_ordinary", f"yield:{a.id}", f"{labels[a.id]} interest and non-qualified dividends", interest))
                 if qd + cgd:
-                    sources.append(Source("cg_qd", f"yield:{a.id}", f"{labels[a.id]} dividends and distributions", qd + cgd))
+                    sources.append(Source("dividends", f"yield:{a.id}", f"{labels[a.id]} dividends and distributions", qd + cgd))
                 reinvested[a.id] = interest + qd + cgd
             for a in accounts:
                 if a.kind == "cash" and bal[a.id] > 0:
@@ -601,7 +607,7 @@ class PlanEngine:
             for acct_id, amount, gain in sale_plan:
                 withdrawn[acct_id] += amount
                 if gain > 0:
-                    sources.append(Source("cg_qd", f"sale:{acct_id}", f"{labels[acct_id]} gains on sales", gain))
+                    sources.append(Source("realized_gains", f"sale:{acct_id}", f"{labels[acct_id]} gains on sales", gain))
                 if amount - gain > 0:
                     sources.append(Source("principal", f"sale:{acct_id}", f"{labels[acct_id]} principal", amount - gain))
             surplus = max(0.0, net) if net >= 0 else 0.0
@@ -720,7 +726,7 @@ class PlanEngine:
             withdrawn[acct.id] += amount
             y.ltcg += gain
             if gain:
-                sources.append(Source("cg_qd", f"withdrawal:{acct.id}", f"{labels[acct.id]} gains on sales", gain))
+                sources.append(Source("realized_gains", f"withdrawal:{acct.id}", f"{labels[acct.id]} gains on sales", gain))
             if amount - gain:
                 sources.append(Source("principal", f"withdrawal:{acct.id}", f"{labels[acct.id]} principal", amount - gain))
             return
@@ -775,12 +781,13 @@ class PlanEngine:
         fs = status_key(prof.filing_status)
         base = yr.taxable_bar
         ordinary_now = sum(
-            s.amount for s in yr.sources if s.category not in TAX_FREE and s.category not in ("cg_qd", "ss")
+            s.amount for s in yr.sources if s.category not in TAX_FREE and s.category not in PREFERENTIAL and s.category != "ss"
         )
         lo, hi = -ordinary_now - 1.0, 5_000_000.0
         out: dict[str, float] = {}
 
-        gains = yr.category_totals()["cg_qd"]
+        totals = yr.category_totals()
+        gains = sum(totals[c] for c in PREFERENTIAL)
 
         def line(key: str, label: str, metric, limit: float, ordinary_only: bool = False) -> None:
             # Ordinary bracket tops are read against the top of the ordinary
@@ -856,7 +863,7 @@ def default_line_visibility(result: PlanResult) -> dict[str, bool]:
             vis[k] = medicare and near(k, 1.05)
     vis["aca:4"] = result.plan.profile.household.aca_marketplace
     vis["deduction"] = False
-    vis["cg0"] = any(yr.category_totals()["cg_qd"] > 0 for yr in result.years)
+    vis["cg0"] = any(yr.category_totals()[c] > 0 for yr in result.years for c in PREFERENTIAL)
     vis["tax_free"] = True
     return vis
 

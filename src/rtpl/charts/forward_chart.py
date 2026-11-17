@@ -17,7 +17,7 @@ from rtpl.theme import Palette
 from .marginal_chart import _escape, _money
 
 # Texture as a second cue beside color (gains and the tax-free segments).
-HATCH = {"cg_qd": "////", "tax_exempt": "....", "roth_withdrawal": "xxxx", "principal": "\\\\\\\\"}
+HATCH = {"dividends": "////", "realized_gains": "\\\\\\\\", "tax_exempt": "....", "roth_withdrawal": "xxxx", "principal": "----"}
 
 # Balances use the colors of the income they feed.
 ACCOUNT_COLOR_KEY = {
@@ -27,7 +27,7 @@ ACCOUNT_COLOR_KEY = {
     "roth_ira": "roth_conversion",
     "roth_401k": "roth_conversion",
     "hsa": "roth_withdrawal",
-    "taxable": "cg_qd",
+    "taxable": "dividends",
     "cash": "principal",
 }
 ACCOUNT_HATCH = {"401k": "....", "roth_401k": "....", "hsa": "xxxx", "taxable": "////", "cash": "\\\\\\\\"}

@@ -189,8 +189,9 @@ def test_deficit_sells_brokerage_and_realizes_gains(lib):
     )
     y0 = run_plan(plan, lib, with_lines=False).years[0]
     ct = y0.category_totals()
-    assert ct["principal"] + ct["cg_qd"] == pytest.approx(60_000 + y0.tax.total_tax, abs=2)
-    assert ct["cg_qd"] == pytest.approx(ct["principal"], rel=1e-6)  # half the balance is gain
+    assert ct["principal"] + ct["realized_gains"] == pytest.approx(60_000 + y0.tax.total_tax, abs=2)
+    assert ct["realized_gains"] == pytest.approx(ct["principal"], rel=1e-6)
+    assert ct["dividends"] == 0  # no yields set on this account  # half the balance is gain
 
 
 def test_example_plan_runs_and_round_trips(lib, tmp_path):
