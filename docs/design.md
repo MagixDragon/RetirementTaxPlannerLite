@@ -1,8 +1,9 @@
 # RetirementTaxPlannerLite design
 
 Status: the marginal tax graph, and a first version of the forward-looking
-plan (engine, graphs, command line and an app page that opens plan files;
-an in-app editor for accounts and rules comes next).
+plan (engine, graphs, command line, and an app page with an editor for
+the plan's items). Next for the editor: per-year overrides typed into the
+year table, named milestones, scenarios to compare, and a setup wizard.
 
 ## Goals
 
@@ -197,9 +198,34 @@ A plan is the baseline profile (people, filing status, state, inflation)
 plus accounts, income streams, Social Security choices, life expectancy,
 assumptions and a short rule list. It is saved as JSON; see
 `examples/plans/couple_conversions_inherited.json`. The app's **Forward
-plan** page opens plan files, and the profile on the left is the plan's
-baseline, so edits there flow into the plan. `rtpl-plan` draws the same
-graphs and writes the year table as CSV.
+plan** page opens plan files. `rtpl-plan` draws the same graphs and
+writes the year table as CSV.
+
+### Editing a plan in the app
+
+On the Forward plan page the left panel has two tabs: **Plan items** and
+**Baseline** (the profile). Plan items is a list grouped into Accounts,
+Income, Social Security, Strategies and Assumptions; each row has a bar
+across the years it covers on the plan's year axis. The selected row's
+form sits under the list, and every edit is written into the plan at once
+and recalculates it a quarter second after the last keystroke. The
+summary above the graph says what the last change did to lifetime tax and
+final balances.
+
+* **Switching items off.** Accounts, income streams and strategies have a
+  tick box. An unticked item stays in the plan file (`"enabled": false`)
+  but is left out of the calculation, along with any strategy on an
+  unticked account, so a what-if is one click and one click back.
+* **Plan name.** A plan has its own free-form name beside the baseline's
+  name; the summary, chart titles and the suggested file name use both
+  ("Smith household - Roth conversions until SS.plan.json").
+* **Timings** are entered as a person's age or a calendar year, and the
+  form shows the other form next to it ("= 2031").
+* **Account ids** are made up by the app (`p1_traditional_ira`); deleting
+  an account also deletes the strategies that use it, after asking.
+* The design for the rest of the editor (milestones, year overrides,
+  scenarios, setup wizard) is in the plan-editor spike,
+  `spikes/plan_editor/mockup.py`, which draws mockups of those screens.
 
 ### Design decisions
 
