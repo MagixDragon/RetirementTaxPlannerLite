@@ -25,3 +25,25 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
       - run: pip install -e ".[dev]"
       - run: pytest -q
+
+  # A pull request that changes the app must raise its version, so each
+  # merge publishes a new release (see docs/packaging.md).
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version is higher than on the base branch
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE"...HEAD -- src packaging pyproject.toml)
+          if [ -z "$changed" ]; then
+            echo "No app files changed; no version bump needed."
+            exit 0
+          fi
+          git show "$BASE:src/rtpl/__init__.py" > /tmp/base_init.py
+          base=$(python3 packaging/version.py --of /tmp/base_init.py)
+          python3 packaging/version.py --newer-than "$base"

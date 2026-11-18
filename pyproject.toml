@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "retirement-tax-planner-lite"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Free, open-source desktop app for marginal and forward-looking tax graphs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,3 +37,7 @@ rtpl = ["data/**/*.toml", "data/icons/*.png", "data/icons/*.ico"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+
+# The version lives only in src/rtpl/__init__.py.
+[tool.setuptools.dynamic]
+version = {attr = "rtpl.__version__"}

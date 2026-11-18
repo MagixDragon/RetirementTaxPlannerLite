@@ -47,37 +47,53 @@ uv run --with pyinstaller pyinstaller packaging/rtpl.spec --noconfirm
 | macOS | `dist/RetirementTaxPlannerLite.app` | In the bundle, so Finder, Dock and Launchpad show it |
 | Linux | `dist/RetirementTaxPlannerLite/RetirementTaxPlannerLite` | Linux programs carry no icon; `sh packaging/linux/install.sh` installs the build with a menu entry and icons |
 
+## Version
+
+The version is set in one place, `__version__` in `src/rtpl/__init__.py`,
+as MAJOR.MINOR.PATCH. Everything else reads it from there:
+
+| Where | How it gets the version |
+| --- | --- |
+| Package metadata (`pip show`) | `pyproject.toml` reads `rtpl.__version__` |
+| About box | `rtpl.__version__` |
+| Windows `.exe` (Properties > Details) | `packaging/rtpl.spec` writes a version resource |
+| macOS `.app` (Get Info) | `packaging/rtpl.spec` writes Info.plist |
+| Release tag and download names | `packaging/version.py`, run by the build workflow |
+
+Checks make sure they agree: the tests compare the package metadata with
+`__version__`, and the build workflow fails if the metadata, the Windows
+version resource or the macOS Info.plist differ from it, or if a hand-made
+tag differs from it.
+
+**Raise the version in every pull request that changes the app** (anything
+under `src/`, `packaging/` or `pyproject.toml`). The *version-bump* check on
+the pull request fails until it is higher than on `main`. Pull requests that
+change only docs, tests or examples need no bump.
+
+* PATCH (0.2.0 to 0.2.1): fixes and small changes.
+* MINOR (0.2.1 to 0.3.0): new features.
+* MAJOR (0.x to 1.0.0): when you decide it is ready for general use.
+
 ## Builds on GitHub
 
-The **build apps** workflow builds all three, checks that each one starts,
-and zips them. It runs:
+The **build apps** workflow builds all three apps, checks that each one
+starts and carries the right version, and zips them as
+`RetirementTaxPlannerLite-<version>-<OS>.zip`. It runs:
 
 * **On every push to `main`** (so after each merged pull request). The zips
   are on that run's page in the Actions tab, under *Artifacts*, for 30 days.
   You must be signed in to GitHub to download them.
-* **On a version tag**, which makes a GitHub Release. The zips are attached
-  to the release on the Releases page, named like
-  `RetirementTaxPlannerLite-0.2.0-Windows.zip`, and stay there for good.
-  Anyone who can see the repository can download them.
+* **Releases happen by themselves.** When a push to `main` carries a version
+  that has no release yet, the workflow also tags that commit `v<version>`
+  and publishes a GitHub Release with the three zips and notes listing the
+  merged pull requests. Releases stay for good, and anyone who can see the
+  repository can download them. Because every app change raises the version,
+  every merged app change becomes a release.
 * On pull requests that change packaging or app code, and by hand
-  (Actions tab, "build apps", "Run workflow").
+  (Actions tab, "build apps", "Run workflow"): builds only, no release.
 
-### Making a release
-
-1. Set the new version in both `pyproject.toml` and `src/rtpl/__init__.py`,
-   and merge that to `main`.
-2. Tag it and push the tag (the tag must be `v` plus that version, or the
-   build stops):
-
-   ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-
-   Or on GitHub: Releases, "Draft a new release", type `v0.2.0` as a new
-   tag on `main`, and publish. The workflow then attaches the zips to it
-   (if you publish this way, the workflow adds the zips to your release
-   instead of making a second one).
+You can also push a tag `v<version>` yourself, or make a release by hand on
+GitHub; the tag must match `__version__`, and the workflow attaches the zips.
 
 ### Opening a downloaded build
 
