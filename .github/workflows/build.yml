@@ -7,13 +7,25 @@ name: build apps
 #   the version in src/rtpl/__init__.py has no release yet, the builds are
 #   also published as GitHub Release v<version>, which stays for good.
 # * A tag v<version> pushed by hand: the same release, for that commit.
-# * Pull requests that touch packaging, and "Run workflow" by hand.
+# * Pull requests that touch packaging (not while they are drafts), and
+#   "Run workflow" by hand.
+#
+# macOS is built only when the repository variable MACOS_BUILDS is true, or
+# when "Run workflow" is started with macOS ticked, because macOS minutes
+# count ten times against the private-repository Actions allowance. See
+# docs/packaging.md.
 on:
   workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also build for macOS (uses 10x the Actions minutes)"
+        type: boolean
+        default: false
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "packaging/**"
       - "src/rtpl/app/**"
@@ -25,9 +37,16 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older, unfinished builds. Runs on
+# main and on tags are never cancelled, so no release is cut short.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Reads the version, and decides whether this run publishes a release.
   version:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -63,6 +82,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        exclude:
+          - os: ${{ (vars.MACOS_BUILDS == 'true' || inputs.macos) && 'none' || 'macos-latest' }}
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
