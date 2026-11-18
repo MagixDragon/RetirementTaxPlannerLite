@@ -247,3 +247,17 @@ def test_plan_name_field_and_suggested_file_name(window):
     assert path.name == "Smith_ household - David retires early.plan.json"
     window._plan_timer.timeout.emit()
     assert "David retires early" in window.plan_view.summary.text()
+
+
+def test_baseline_tab_gets_its_full_height(window):
+    """Switching to the Baseline tab on the plan page must not squash the profile form."""
+    window.resize(1200, 700)
+    window.show()
+    window.input_tabs.setCurrentWidget(window.form)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+    QtWidgets.QApplication.processEvents()
+    assert window.form.sizePolicy().verticalPolicy() != QtWidgets.QSizePolicy.Policy.Ignored
+    assert window.form.height() >= window.form.minimumSizeHint().height()
+    window.input_tabs.setCurrentWidget(window.plan_editor)
+    QtWidgets.QApplication.processEvents()
+    assert window.plan_editor.height() >= window.plan_editor.minimumSizeHint().height()

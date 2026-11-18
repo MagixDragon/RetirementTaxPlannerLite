@@ -243,6 +243,7 @@ class MainWindow(QMainWindow):
         self.input_tabs.addTab(self.plan_editor, "&Plan items")
         self.input_tabs.addTab(self.form, "&Baseline")
         self.inputs_panel = SidePanel("Inputs", self.input_tabs, Qt.Edge.LeftEdge)
+        self.input_tabs.currentChanged.connect(self._size_input_tabs)
         # Center pages: the marginal graph, and the forward-looking plan
         self.plan_path: Path | None = None
         self.plan_view = PlanView(self.library)
@@ -395,10 +396,15 @@ class MainWindow(QMainWindow):
         title = "Plan" if show else "Inputs"
         self.inputs_panel.title.setText(f"<b>{title}</b>")
         self.inputs_panel.setAccessibleName(title)
-        # Only the shown tab counts toward the panel's width.
+        self._size_input_tabs()
+
+    def _size_input_tabs(self, *_args) -> None:
+        """Only the shown tab counts toward the panel's size, so switching to
+        the long Baseline form gets its full height (and a scroll bar)."""
         for i in range(self.input_tabs.count()):
             policy = QSizePolicy.Policy.Preferred if i == self.input_tabs.currentIndex() else QSizePolicy.Policy.Ignored
             self.input_tabs.widget(i).setSizePolicy(policy, policy)
+        self.input_tabs.updateGeometry()
         if hasattr(self, "panels"):
             self.panels.refit(self.inputs_panel)
 
