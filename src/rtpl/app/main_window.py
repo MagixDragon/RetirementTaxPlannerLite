@@ -7,7 +7,7 @@ from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import QSettings, QStandardPaths, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap, QGuiApplication, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,7 +42,7 @@ from rtpl.app.inputs import ComboBox
 from rtpl.app.plan_editor import PlanEditor
 from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
-from rtpl.app.side_panel import PanelHost, SidePanel
+from rtpl.app.side_panel import PanelHost, PanelTabs, SidePanel
 from rtpl.charts.marginal_chart import render_marginal
 from rtpl.engine.marginal import (
     ANNOTATIONS,
@@ -237,9 +237,7 @@ class MainWindow(QMainWindow):
         # On the Forward plan page the panel also lists the plan's items; the
         # profile becomes its Baseline tab. Elsewhere only the profile shows.
         self.plan_editor = PlanEditor()
-        self.input_tabs = QTabWidget()
-        self.input_tabs.setDocumentMode(True)
-        self.input_tabs.setTabBarAutoHide(True)
+        self.input_tabs = PanelTabs()
         self.input_tabs.addTab(self.plan_editor, "&Plan items")
         self.input_tabs.addTab(self.form, "&Baseline")
         self.inputs_panel = SidePanel("Inputs", self.input_tabs, Qt.Edge.LeftEdge)
@@ -399,15 +397,9 @@ class MainWindow(QMainWindow):
         self._size_input_tabs()
 
     def _size_input_tabs(self, *_args) -> None:
-        """Only the shown tab counts toward the panel's size, so switching to
-        the long Baseline form gets its full height (and a scroll bar)."""
-        for i in range(self.input_tabs.count()):
-            policy = QSizePolicy.Policy.Preferred if i == self.input_tabs.currentIndex() else QSizePolicy.Policy.Ignored
-            self.input_tabs.widget(i).setSizePolicy(policy, policy)
-        self.input_tabs.updateGeometry()
-        # Make the scroll area re-measure now rather than on a later event
-        # pass (macOS otherwise kept the old, squashed height).
-        self.inputs_panel.scroll.setWidgetResizable(True)
+        """Re-measure the panel for the page now shown: its scroll area takes
+        the new page's height at once, and the panel widens if needed."""
+        QApplication.sendEvent(self.inputs_panel.scroll, QEvent(QEvent.Type.LayoutRequest))
         if hasattr(self, "panels"):
             self.panels.refit(self.inputs_panel)
 

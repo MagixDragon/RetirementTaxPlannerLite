@@ -250,16 +250,14 @@ def test_plan_name_field_and_suggested_file_name(window):
 
 
 def test_baseline_tab_gets_its_full_height(window):
-    """Switching to the Baseline tab on the plan page must not squash the profile form."""
+    """Switching to the Baseline tab on the plan page must not squash the
+    profile form: the panel measures only the page on show, right away."""
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
     window.resize(1200, 700)
     window.show()
-    window.input_tabs.setCurrentWidget(window.form)
-    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
-    for _ in range(3):
-        QtWidgets.QApplication.processEvents()
-    assert window.form.sizePolicy().verticalPolicy() != QtWidgets.QSizePolicy.Policy.Ignored
-    assert window.form.height() >= window.form.minimumSizeHint().height()
-    window.input_tabs.setCurrentWidget(window.plan_editor)
-    for _ in range(3):
-        QtWidgets.QApplication.processEvents()
-    assert window.plan_editor.height() >= window.plan_editor.minimumSizeHint().height()
+    QtWidgets.QApplication.processEvents()
+    for page in (window.form, window.plan_editor, window.form):
+        window.input_tabs.setCurrentWidget(page)
+        assert page.isVisible() and page.height() >= page.minimumSizeHint().height()
+        others = [p for p in (window.form, window.plan_editor) if p is not page]
+        assert all(not p.isVisible() for p in others)
