@@ -58,7 +58,9 @@ Run the tests with `pytest`.
 
 For a desktop or Start-menu shortcut with the app icon, run
 `uv run rtpl-shortcut`. To build a stand-alone app for Windows, macOS or
-Linux, see [docs/packaging.md](docs/packaging.md).
+Linux, see [docs/packaging.md](docs/packaging.md). Ready-made builds are on
+the Releases page for each version, and GitHub builds fresh ones after every
+change to `main`.
 
 ## What's in the box
 

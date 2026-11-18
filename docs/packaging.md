@@ -47,9 +47,51 @@ uv run --with pyinstaller pyinstaller packaging/rtpl.spec --noconfirm
 | macOS | `dist/RetirementTaxPlannerLite.app` | In the bundle, so Finder, Dock and Launchpad show it |
 | Linux | `dist/RetirementTaxPlannerLite/RetirementTaxPlannerLite` | Linux programs carry no icon; `sh packaging/linux/install.sh` installs the build with a menu entry and icons |
 
-The **build apps** workflow on GitHub (Actions tab, "Run workflow") builds
-all three, checks that each one starts, and offers them as downloads.
+## Builds on GitHub
 
-Next steps not done yet: a Windows installer (for example Inno Setup,
+The **build apps** workflow builds all three, checks that each one starts,
+and zips them. It runs:
+
+* **On every push to `main`** (so after each merged pull request). The zips
+  are on that run's page in the Actions tab, under *Artifacts*, for 30 days.
+  You must be signed in to GitHub to download them.
+* **On a version tag**, which makes a GitHub Release. The zips are attached
+  to the release on the Releases page, named like
+  `RetirementTaxPlannerLite-0.2.0-Windows.zip`, and stay there for good.
+  Anyone who can see the repository can download them.
+* On pull requests that change packaging or app code, and by hand
+  (Actions tab, "build apps", "Run workflow").
+
+### Making a release
+
+1. Set the new version in both `pyproject.toml` and `src/rtpl/__init__.py`,
+   and merge that to `main`.
+2. Tag it and push the tag (the tag must be `v` plus that version, or the
+   build stops):
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+   Or on GitHub: Releases, "Draft a new release", type `v0.2.0` as a new
+   tag on `main`, and publish. The workflow then attaches the zips to it
+   (if you publish this way, the workflow adds the zips to your release
+   instead of making a second one).
+
+### Opening a downloaded build
+
+The builds are not code-signed, so each OS warns the first time:
+
+* **Windows:** unzip, run `RetirementTaxPlannerLite.exe`. If SmartScreen
+  says "Windows protected your PC", click *More info*, then *Run anyway*.
+* **macOS** (Apple Silicon): unzip, drag the app to Applications, then
+  right-click it, *Open*, and *Open* again. On recent macOS, if that does
+  not offer *Open*, go to System Settings, Privacy & Security, and click
+  *Open Anyway*.
+* **Linux** (x86-64): unzip and run
+  `RetirementTaxPlannerLite/RetirementTaxPlannerLite`.
+
+Next steps not done yet: an Intel Mac build, a Windows installer (for example Inno Setup,
 which would also make the Start-menu shortcut), macOS code signing and
 notarization, and a Linux AppImage or Flatpak.
