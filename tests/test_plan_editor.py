@@ -255,9 +255,11 @@ def test_baseline_tab_gets_its_full_height(window):
     window.show()
     window.input_tabs.setCurrentWidget(window.form)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
-    QtWidgets.QApplication.processEvents()
+    for _ in range(3):
+        QtWidgets.QApplication.processEvents()
     assert window.form.sizePolicy().verticalPolicy() != QtWidgets.QSizePolicy.Policy.Ignored
     assert window.form.height() >= window.form.minimumSizeHint().height()
     window.input_tabs.setCurrentWidget(window.plan_editor)
-    QtWidgets.QApplication.processEvents()
+    for _ in range(3):
+        QtWidgets.QApplication.processEvents()
     assert window.plan_editor.height() >= window.plan_editor.minimumSizeHint().height()

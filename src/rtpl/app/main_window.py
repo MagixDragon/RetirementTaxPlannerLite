@@ -405,6 +405,9 @@ class MainWindow(QMainWindow):
             policy = QSizePolicy.Policy.Preferred if i == self.input_tabs.currentIndex() else QSizePolicy.Policy.Ignored
             self.input_tabs.widget(i).setSizePolicy(policy, policy)
         self.input_tabs.updateGeometry()
+        # Make the scroll area re-measure now rather than on a later event
+        # pass (macOS otherwise kept the old, squashed height).
+        self.inputs_panel.scroll.setWidgetResizable(True)
         if hasattr(self, "panels"):
             self.panels.refit(self.inputs_panel)
 
