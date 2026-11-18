@@ -19,11 +19,90 @@ from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QSplitter,
+    QTabBar,
     QStyle,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+
+class PanelTabs(QWidget):
+    """Tabs for a side panel's body that hold only the shown page in the layout.
+
+    A QTabWidget sizes itself to its largest page, so a short tab would get
+    the long profile form's height (or the reverse). Here the hidden pages
+    are out of the layout altogether, so the panel's scroll area measures
+    exactly the page on show. The tab bar hides itself with one tab left.
+    """
+
+    currentChanged = Signal(int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bar = QTabBar()
+        self.bar.setDocumentMode(True)
+        self.bar.setExpanding(False)
+        self.pages: list[QWidget] = []
+        self._current = -1
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(4)
+        self._lay.addWidget(self.bar)
+        self.bar.currentChanged.connect(self._show)
+
+    def addTab(self, page: QWidget, text: str) -> int:  # noqa: N802 (Qt-style name)
+        page.setParent(self)
+        page.hide()
+        self.pages.append(page)
+        index = self.bar.addTab(text)
+        if self._current < 0:
+            self._show(index)
+        self._update_bar()
+        return index
+
+    def _show(self, index: int) -> None:
+        if index < 0 or index == self._current:
+            return
+        if 0 <= self._current < len(self.pages):
+            old = self.pages[self._current]
+            self._lay.removeWidget(old)
+            old.hide()
+        self._current = index
+        page = self.pages[index]
+        self._lay.addWidget(page, 1)
+        page.show()
+        self.updateGeometry()
+        self.currentChanged.emit(index)
+
+    def _update_bar(self) -> None:
+        self.bar.setVisible(sum(self.bar.isTabVisible(i) for i in range(self.bar.count())) > 1)
+
+    def count(self) -> int:
+        return len(self.pages)
+
+    def widget(self, index: int) -> QWidget:
+        return self.pages[index]
+
+    def currentIndex(self) -> int:  # noqa: N802
+        return self._current
+
+    def currentWidget(self) -> QWidget | None:  # noqa: N802
+        return self.pages[self._current] if self._current >= 0 else None
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802
+        self.bar.setCurrentIndex(index)
+        self._show(index)
+
+    def setCurrentWidget(self, page: QWidget) -> None:  # noqa: N802
+        self.setCurrentIndex(self.pages.index(page))
+
+    def isTabVisible(self, index: int) -> bool:  # noqa: N802
+        return self.bar.isTabVisible(index)
+
+    def setTabVisible(self, index: int, visible: bool) -> None:  # noqa: N802
+        self.bar.setTabVisible(index, visible)
+        self._update_bar()
 
 
 class SidePanel(QFrame):
@@ -180,6 +259,12 @@ class PanelHost(QObject):
         elif not open_ and had_focus:
             self.center.setFocus(Qt.FocusReason.OtherFocusReason)
         self.visibility_changed.emit(panel, open_)
+
+    def refit(self, panel: SidePanel) -> None:
+        """Re-measure a panel whose contents changed, widening it if needed."""
+        panel.fit_width()
+        if self._open[id(panel)]:
+            self._place(panel)
 
     def toggle(self, panel: SidePanel) -> None:
         self.set_open(panel, not self.is_open(panel))

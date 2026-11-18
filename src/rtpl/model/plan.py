@@ -20,7 +20,7 @@ Design points (see docs/design.md, "Forward-looking plan"):
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from .profile import Profile
@@ -123,6 +123,7 @@ class Account:
     original_owner_birth_year: int | None = None
     owner_started_rmds: bool = True  # the owner died on or after their RMD start
     eligible_designated_beneficiary: bool = False  # stretch over life expectancy, no 10-year limit
+    enabled: bool = True  # False leaves the account (and rules on it) out, for what-ifs
 
     def label(self, profile: Profile) -> str:
         if self.name:
@@ -162,6 +163,7 @@ class IncomeStream:
     survivor_pct: float = 0.0  # share that continues to the survivor (pensions)
     federal_taxable_pct: float = 1.0
     state_taxable_pct: float = 1.0  # not used yet: the state taxes what the federal return does
+    enabled: bool = True  # False leaves the stream out, for what-ifs
 
     def label(self, profile: Profile) -> str:
         if self.name:
@@ -238,6 +240,7 @@ class Rule:
 @dataclass
 class Plan:
     profile: Profile
+    name: str = ""  # the plan's own name, e.g. "Roth conversions until Social Security"
     people: list[PersonPlan] = field(default_factory=list)
     accounts: list[Account] = field(default_factory=list)
     incomes: list[IncomeStream] = field(default_factory=list)
@@ -274,6 +277,35 @@ class Plan:
             dy = self.death_year(i)
             last = max(last, dy if dy is not None else p.birth_year + self.assumptions.end_age)
         return last
+
+    @property
+    def title(self) -> str:
+        """Baseline name and plan name, e.g. "Smith household - Roth conversions until SS"."""
+        parts = [p for p in (self.profile.name.strip(), self.name.strip()) if p]
+        return " - ".join(parts) or "Plan"
+
+    def active(self) -> "Plan":
+        """The plan without the accounts, income streams and rules the user
+        switched off (and without rules on a switched-off account)."""
+        accounts = [a for a in self.accounts if a.enabled]
+        ids = {a.id for a in accounts}
+        return replace(
+            self,
+            accounts=accounts,
+            incomes=[s for s in self.incomes if s.enabled],
+            rules=[r for r in self.rules if r.enabled and r.account in ids],
+        )
+
+    def new_account_id(self, kind: str, owner: int | None) -> str:
+        """A readable id not used by another account, e.g. "p1_traditional_ira_2"."""
+        stem = f"{'joint' if owner is None else f'p{owner + 1}'}_{kind}"
+        used = {a.id for a in self.accounts}
+        if stem not in used:
+            return stem
+        n = 2
+        while f"{stem}_{n}" in used:
+            n += 1
+        return f"{stem}_{n}"
 
     def account(self, acct_id: str) -> Account | None:
         return next((a for a in self.accounts if a.id == acct_id), None)
@@ -329,8 +361,8 @@ class Plan:
             r["end"] = When.from_dict(r.get("end"))
             rules.append(Rule(**r))
         assumptions = Assumptions(**data.get("assumptions", {}))
-        return cls(profile=profile, people=people, accounts=accounts, incomes=incomes,
-                   rules=rules, assumptions=assumptions)
+        return cls(profile=profile, name=data.get("name", ""), people=people, accounts=accounts,
+                   incomes=incomes, rules=rules, assumptions=assumptions)
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")

@@ -34,6 +34,11 @@ ACCOUNT_HATCH = {"401k": "....", "roth_401k": "....", "hsa": "xxxx", "taxable": 
 ACCOUNT_ORDER = ("taxable", "cash", "traditional_ira", "401k", "inherited_ira", "roth_ira", "roth_401k", "hsa")
 
 
+
+def _plan_label(plan) -> str:
+    """Baseline name and, if it has one, the plan's own name."""
+    return " · ".join(p for p in (plan.profile.name.strip(), plan.name.strip()) if p) or "Plan"
+
 def _mix(color: str, other: str, t: float) -> str:
     a, b = to_rgb(color), to_rgb(other)
     return to_hex(tuple(x + (y - x) * t for x, y in zip(a, b)))
@@ -206,7 +211,7 @@ def render_income(
 
     p = result.plan.profile
     dollars = f"today's ({result.plan.start_year}) dollars" if todays_dollars else "future (nominal) dollars"
-    ax.set_title(_escape(f"Income by source and tax thresholds\n{p.name} · {dollars}"),
+    ax.set_title(_escape(f"Income by source and tax thresholds\n{_plan_label(result.plan)} · {dollars}"),
                  color=palette.text_primary, fontsize=11, loc="left")
     ax.set_ylabel("Income", color=palette.text_secondary)
 
@@ -290,7 +295,7 @@ def render_balances(
     ax.set_ylim(0, max(max(bottom.values(), default=0), 10_000) * 1.08)
     _year_axis(ax, result, palette)
     dollars = f"today's ({result.plan.start_year}) dollars" if todays_dollars else "future (nominal) dollars"
-    ax.set_title(_escape(f"Account balances at year end\n{result.plan.profile.name} · {dollars}"),
+    ax.set_title(_escape(f"Account balances at year end\n{_plan_label(result.plan)} · {dollars}"),
                  color=palette.text_primary, fontsize=11, loc="left")
     ax.set_ylabel("Balance", color=palette.text_secondary)
     _legend_and_notes(fig, handles[::-1], list(result.notes), palette, ncol=4, right=0.97)
