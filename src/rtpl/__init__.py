@@ -1,3 +1,5 @@
 """RetirementTaxPlannerLite: marginal and forward-looking tax graphs."""
 
-__version__ = "0.1.0"
+# The one place the version is set. Raise it in every pull request that
+# changes the app (see docs/packaging.md); GitHub then publishes a release.
+__version__ = "0.2.0"

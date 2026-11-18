@@ -47,9 +47,67 @@ uv run --with pyinstaller pyinstaller packaging/rtpl.spec --noconfirm
 | macOS | `dist/RetirementTaxPlannerLite.app` | In the bundle, so Finder, Dock and Launchpad show it |
 | Linux | `dist/RetirementTaxPlannerLite/RetirementTaxPlannerLite` | Linux programs carry no icon; `sh packaging/linux/install.sh` installs the build with a menu entry and icons |
 
-The **build apps** workflow on GitHub (Actions tab, "Run workflow") builds
-all three, checks that each one starts, and offers them as downloads.
+## Version
 
-Next steps not done yet: a Windows installer (for example Inno Setup,
+The version is set in one place, `__version__` in `src/rtpl/__init__.py`,
+as MAJOR.MINOR.PATCH. Everything else reads it from there:
+
+| Where | How it gets the version |
+| --- | --- |
+| Package metadata (`pip show`) | `pyproject.toml` reads `rtpl.__version__` |
+| About box | `rtpl.__version__` |
+| Windows `.exe` (Properties > Details) | `packaging/rtpl.spec` writes a version resource |
+| macOS `.app` (Get Info) | `packaging/rtpl.spec` writes Info.plist |
+| Release tag and download names | `packaging/version.py`, run by the build workflow |
+
+Checks make sure they agree: the tests compare the package metadata with
+`__version__`, and the build workflow fails if the metadata, the Windows
+version resource or the macOS Info.plist differ from it, or if a hand-made
+tag differs from it.
+
+**Raise the version in every pull request that changes the app** (anything
+under `src/`, `packaging/` or `pyproject.toml`). The *version-bump* check on
+the pull request fails until it is higher than on `main`. Pull requests that
+change only docs, tests or examples need no bump.
+
+* PATCH (0.2.0 to 0.2.1): fixes and small changes.
+* MINOR (0.2.1 to 0.3.0): new features.
+* MAJOR (0.x to 1.0.0): when you decide it is ready for general use.
+
+## Builds on GitHub
+
+The **build apps** workflow builds all three apps, checks that each one
+starts and carries the right version, and zips them as
+`RetirementTaxPlannerLite-<version>-<OS>.zip`. It runs:
+
+* **On every push to `main`** (so after each merged pull request). The zips
+  are on that run's page in the Actions tab, under *Artifacts*, for 30 days.
+  You must be signed in to GitHub to download them.
+* **Releases happen by themselves.** When a push to `main` carries a version
+  that has no release yet, the workflow also tags that commit `v<version>`
+  and publishes a GitHub Release with the three zips and notes listing the
+  merged pull requests. Releases stay for good, and anyone who can see the
+  repository can download them. Because every app change raises the version,
+  every merged app change becomes a release.
+* On pull requests that change packaging or app code, and by hand
+  (Actions tab, "build apps", "Run workflow"): builds only, no release.
+
+You can also push a tag `v<version>` yourself, or make a release by hand on
+GitHub; the tag must match `__version__`, and the workflow attaches the zips.
+
+### Opening a downloaded build
+
+The builds are not code-signed, so each OS warns the first time:
+
+* **Windows:** unzip, run `RetirementTaxPlannerLite.exe`. If SmartScreen
+  says "Windows protected your PC", click *More info*, then *Run anyway*.
+* **macOS** (Apple Silicon): unzip, drag the app to Applications, then
+  right-click it, *Open*, and *Open* again. On recent macOS, if that does
+  not offer *Open*, go to System Settings, Privacy & Security, and click
+  *Open Anyway*.
+* **Linux** (x86-64): unzip and run
+  `RetirementTaxPlannerLite/RetirementTaxPlannerLite`.
+
+Next steps not done yet: an Intel Mac build, a Windows installer (for example Inno Setup,
 which would also make the Start-menu shortcut), macOS code signing and
 notarization, and a Linux AppImage or Flatpak.
