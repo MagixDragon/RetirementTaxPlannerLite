@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -40,7 +42,12 @@ from rtpl.app.profile_form import compact_form, money_box
 from rtpl.engine.social_security import full_retirement_age
 from rtpl.model.plan import (
     ACCOUNT_KINDS,
+    BENEFICIARY_KINDS,
+    COLA_INCOME_KINDS,
+    COLA_KINDS,
     INCOME_KINDS,
+    RULE_GROWTH_KINDS,
+    SPENDING_SOURCES,
     RULE_KINDS,
     ROTH_KINDS,
     TRADITIONAL_KINDS,
@@ -50,17 +57,19 @@ from rtpl.model.plan import (
     Plan,
     Rule,
     When,
+    event_label,
+    events_for,
 )
 
 ROLE = Qt.ItemDataRole.UserRole  # (kind, object) of a row
 BAR_ROLE = Qt.ItemDataRole.UserRole + 1  # (first, last, color, milestone 0 or 1) for the bar column
 
 GROUPS = (
+    ("assumptions", "Assumptions"),
     ("accounts", "Accounts"),
     ("incomes", "Income"),
     ("people", "Social Security"),
     ("rules", "Strategies"),
-    ("assumptions", "Assumptions"),
 )
 
 GROUP_COLORS = {
@@ -313,13 +322,16 @@ class OptionalField(QWidget):
 
 
 class WhenEdit(QWidget):
-    """A timing: one person's age, a calendar year, or (if allowed) none."""
+    """A timing: one person's age, a calendar year, a death or the end of
+    the plan, or (if allowed) none. As a start, a death means the year after
+    it (the first year without that person)."""
 
     changed = Signal()
 
-    def __init__(self, none_label: str | None = None) -> None:
+    def __init__(self, none_label: str | None = None, *, start: bool = False) -> None:
         super().__init__()
         self.none_label = none_label
+        self.is_start = start
         self.plan: Plan | None = None
         self.max_year: int | None = None
         self.min_year: int | None = None
@@ -347,6 +359,8 @@ class WhenEdit(QWidget):
         for i, p in enumerate(plan.profile.people):
             self.mode.addItem(f"{p.name}'s age", i)
         self.mode.addItem("Year", "year")
+        for event in events_for(plan.profile, start=self.is_start):
+            self.mode.addItem(event_label(event, plan.profile, start=self.is_start), f"event:{event}")
         self._loading = False
 
     def setAccessibleName(self, name: str) -> None:  # noqa: N802 (Qt name)
@@ -358,13 +372,18 @@ class WhenEdit(QWidget):
         self._loading = True
         if when is None:
             self.mode.setCurrentIndex(max(0, self.mode.findData("none")))
+        elif when.event is not None:
+            idx = self.mode.findData(f"event:{when.event}")
+            if idx < 0 and when.event.startswith("death:"):  # a person the baseline no longer has
+                idx = self.mode.findData(f"event:death:{len(self.plan.profile.people) - 1}")
+            self.mode.setCurrentIndex(max(0, idx))
         elif when.year is not None:
             self.mode.setCurrentIndex(self.mode.findData("year"))
         else:
             idx = self.mode.findData(min(when.person, len(self.plan.profile.people) - 1))
             self.mode.setCurrentIndex(max(0, idx))
         self._apply_range()
-        if when is not None:
+        if when is not None and when.event is None:
             self.spin.setValue(int(when.year if when.year is not None else when.age))
         self._loading = False
         self._show_result()
@@ -375,6 +394,8 @@ class WhenEdit(QWidget):
             return None
         if data == "year":
             return When(year=self.spin.value())
+        if isinstance(data, str) and data.startswith("event:"):
+            return When(event=data[6:])
         return When(age=self.spin.value(), person=int(data))
 
     def set_max_year(self, year: int | None) -> None:
@@ -395,7 +416,10 @@ class WhenEdit(QWidget):
 
     def _apply_range(self) -> None:
         data = self.mode.currentData()
-        self.spin.setVisible(data != "none")
+        event = isinstance(data, str) and data.startswith("event:")
+        self.spin.setVisible(data != "none" and not event)
+        if event:
+            return
         lo, hi = self.min_year, self.max_year
         if lo is not None and hi is not None:
             hi = max(hi, lo)
@@ -418,8 +442,8 @@ class WhenEdit(QWidget):
         data = self.mode.currentData()
         if data == "year":
             self.spin.setValue(old_year)
-        elif data != "none":
-            self.spin.setValue(old_year - self.plan.profile.people[int(data)].birth_year)
+        elif isinstance(data, int):
+            self.spin.setValue(old_year - self.plan.profile.people[data].birth_year)
         self._loading = False
         self._show_result()
         self.changed.emit()
@@ -432,7 +456,7 @@ class WhenEdit(QWidget):
 
     def _year_of(self, when: When | None) -> int:
         assert self.plan is not None
-        return self.plan.start_year if when is None else when.resolve(self.plan.profile)
+        return self.plan.start_year if when is None else when.resolve(self.plan.profile, start=self.is_start)
 
     def _show_result(self) -> None:
         when = self.value()
@@ -440,12 +464,88 @@ class WhenEdit(QWidget):
         if self.plan is None or when is None:
             self.result.setText("")
             return
-        year = when.resolve(self.plan.profile)
-        if when.year is not None:
+        year = when.resolve(self.plan.profile, start=self.is_start)
+        if when.event is not None:
+            self.result.setText(f"= {year}")
+        elif when.year is not None:
             ages = [f"{p.name} {year - p.birth_year}" for p in self.plan.profile.people]
             self.result.setText(", ".join(ages))
         else:
             self.result.setText(f"= {year}")
+
+
+class SpendingOrderEdit(QWidget):
+    """Which account types pay for spending when income falls short, and in
+    what order: a list of tick boxes with Up and Down buttons."""
+
+    changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.list = QListWidget()
+        self.list.setMinimumWidth(200)
+        buttons = QVBoxLayout()
+        self.up = QPushButton("Up")
+        self.down = QPushButton("Down")
+        self.up.setAccessibleName("Move up in the spending order")
+        self.down.setAccessibleName("Move down in the spending order")
+        buttons.addWidget(self.up)
+        buttons.addWidget(self.down)
+        buttons.addStretch(1)
+        lay.addWidget(self.list, 1)
+        lay.addLayout(buttons)
+        self.up.clicked.connect(lambda: self.move(-1))
+        self.down.clicked.connect(lambda: self.move(1))
+        self.list.itemChanged.connect(lambda _item: self.changed.emit())
+        self.list.currentRowChanged.connect(self._update_buttons)
+
+    def setAccessibleName(self, name: str) -> None:  # noqa: N802 (Qt name)
+        super().setAccessibleName(name)
+        self.list.setAccessibleName(name)
+
+    def setToolTip(self, tip: str) -> None:  # noqa: N802 (Qt name)
+        super().setToolTip(tip)
+        self.list.setToolTip(tip)
+
+    def set_value(self, order: list[str]) -> None:
+        """Ticked types first, in ``order``; the others after, unticked."""
+        self.list.blockSignals(True)
+        self.list.clear()
+        keys = [k for k in order if k in SPENDING_SOURCES] + [k for k in SPENDING_SOURCES if k not in order]
+        for k in keys:
+            item = QListWidgetItem(SPENDING_SOURCES[k])
+            item.setData(ROLE, k)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if k in order else Qt.CheckState.Unchecked)
+            self.list.addItem(item)
+        self.list.blockSignals(False)
+        rows = self.list.count()
+        self.list.setFixedHeight(rows * max(1, self.list.sizeHintForRow(0)) + 2 * self.list.frameWidth() + 2)
+        self._update_buttons()
+
+    def value(self) -> list[str]:
+        return [self.list.item(i).data(ROLE) for i in range(self.list.count())
+                if self.list.item(i).checkState() == Qt.CheckState.Checked]
+
+    def move(self, step: int) -> None:
+        row = self.list.currentRow()
+        new = row + step
+        if row < 0 or not 0 <= new < self.list.count():
+            return
+        self.list.blockSignals(True)
+        item = self.list.takeItem(row)
+        self.list.insertItem(new, item)
+        self.list.setCurrentRow(new)
+        self.list.blockSignals(False)
+        self._update_buttons()
+        self.changed.emit()
+
+    def _update_buttons(self, *_args) -> None:
+        row = self.list.currentRow()
+        self.up.setEnabled(row > 0)
+        self.down.setEnabled(0 <= row < self.list.count() - 1)
 
 
 # -- forms -------------------------------------------------------------------------
@@ -480,6 +580,22 @@ class ItemForm(QWidget):
         self.row(text, label)
         return label
 
+    def hint_row(self, text: str = "") -> QLabel:
+        """A visible, greyed line of explanation under the field above it."""
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setMinimumWidth(220)
+        label.setStyleSheet("color: palette(placeholder-text);")
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.form.addRow("", label)
+        return label
+
+    def info_row(self, text: str) -> QLabel:
+        """A greyed, read-only value set somewhere else (the label's text says where)."""
+        label = self.note_row(text)
+        label.setStyleSheet("color: palette(placeholder-text);")
+        return label
+
     def show_row(self, widget: QWidget, visible: bool) -> None:
         self.form.setRowVisible(widget, visible)
 
@@ -493,7 +609,7 @@ class ItemForm(QWidget):
                 w.textEdited.connect(self._edited)
             elif isinstance(w, QCheckBox):
                 w.toggled.connect(self._edited)
-            elif isinstance(w, (WhenEdit, AgeEdit, OptionalField)):
+            elif isinstance(w, (WhenEdit, AgeEdit, OptionalField, SpendingOrderEdit)):
                 w.changed.connect(self._edited)
 
     def load(self, plan: Plan, obj) -> None:
@@ -559,11 +675,16 @@ class AccountForm(ItemForm):
         self.orig_birth = self.row("Original owner born", SpinBox())
         self.orig_birth.setRange(1880, 2100)
         self.started = self.row("RMDs", QCheckBox("The original owner had started RMDs"))
-        self.edb = self.row("Stretch", QCheckBox("Eligible designated beneficiary (no 10-year limit)"))
+        self.beneficiary = self.row("Who inherited it", ComboBox(),
+                                    "The owner of this account in the plan, as the original owner's beneficiary")
+        for k, label in BENEFICIARY_KINDS.items():
+            self.beneficiary.addItem(label, k)
         self.deadline = self.note_row("Withdrawals")
+        self.deadline.setWordWrap(True)
+        self.deadline.setMinimumWidth(220)
         self.watch(self.name, self.kind, self.owner, self.balance, self.own_return, self.return_rate, self.basis,
                    self.interest, self.qdiv, self.nqdiv, self.capdist, self.spouse_bene, self.inherited_year,
-                   self.orig_birth, self.started, self.edb)
+                   self.orig_birth, self.started, self.beneficiary)
 
     def fill(self) -> None:
         a: Account = self.obj
@@ -583,7 +704,7 @@ class AccountForm(ItemForm):
         self.inherited_year.setValue(a.inherited_year or self.plan.start_year - 1)
         self.orig_birth.setValue(a.original_owner_birth_year or 1945)
         self.started.setChecked(a.owner_started_rmds)
-        self.edb.setChecked(a.eligible_designated_beneficiary)
+        self.beneficiary.setCurrentIndex(max(0, self.beneficiary.findData(a.beneficiary)))
 
     def store(self) -> None:
         a: Account = self.obj
@@ -609,7 +730,7 @@ class AccountForm(ItemForm):
             a.inherited_year = self.inherited_year.value()
             a.original_owner_birth_year = self.orig_birth.value()
         a.owner_started_rmds = self.started.isChecked()
-        a.eligible_designated_beneficiary = self.edb.isChecked()
+        a.beneficiary = self.beneficiary.currentData()
 
     def update_rows(self) -> None:
         kind = self.kind.currentData()
@@ -629,13 +750,11 @@ class AccountForm(ItemForm):
                                       "interest. Change it in Assumptions.")
         self.show_row(self.spouse_bene, kind in TRADITIONAL_KINDS)
         inherited = kind == "inherited_ira"
-        for w in (self.inherited_year, self.orig_birth, self.started, self.edb, self.deadline):
+        for w in (self.inherited_year, self.orig_birth, self.started, self.beneficiary, self.deadline):
             self.show_row(w, inherited)
-        if inherited:
-            if self.edb.isChecked():
-                self.deadline.setText("Lifetime withdrawals (no 10-year limit)")
-            else:
-                self.deadline.setText(f"10-year rule: empty by {self.inherited_year.value() + 10}")
+        if inherited and self.plan is not None and self.obj is not None:
+            rule = self.obj.inherited_rule(self.plan.profile)
+            self.deadline.setText(rule.text if rule else "")
 
 
 class IncomeForm(ItemForm):
@@ -647,12 +766,17 @@ class IncomeForm(ItemForm):
             self.kind.addItem(label, k)
         self.owner = self.row("Owner", ComboBox())
         self.amount = self.row("Yearly amount", money_box(), "In the first year it is paid")
-        self.start = self.row("Starts", WhenEdit("Plan start"))
+        self.start = self.row("Starts", WhenEdit("Plan start", start=True))
         self.end = self.row("Ends (last year paid)", WhenEdit("For life"))
-        self.growth = self.row("Yearly increase", percent_box(-10, 20), "COLA or raises after the first year")
+        self.cola = self.row("COLA", ComboBox(), "How the amount rises after the first year it is paid")
+        for k, label in COLA_KINDS.items():
+            self.cola.addItem(label, k)
+        self.growth = self.row("COLA rate", percent_box(-10, 20), "The yearly increase after the first year")
+        self.cola_note = self.hint_row(
+            "For a pension with a floor or cap, enter the rate it works out to at your inflation rate.")
         self.survivor = self.row("To the survivor", percent_box(0, 100, 5), "Share that continues after the owner dies")
         self.taxable = self.row("Federally taxable", percent_box(0, 100, 5))
-        self.watch(self.name, self.kind, self.owner, self.amount, self.start, self.end, self.growth,
+        self.watch(self.name, self.kind, self.owner, self.amount, self.start, self.end, self.cola, self.growth,
                    self.survivor, self.taxable)
 
     def fill(self) -> None:
@@ -665,6 +789,7 @@ class IncomeForm(ItemForm):
         for w, when in ((self.start, s.start), (self.end, s.end)):
             w.set_plan(self.plan)
             w.set_value(when)
+        self.cola.setCurrentIndex(max(0, self.cola.findData(s.cola)))
         self.growth.setValue(100 * s.growth)
         self.survivor.setValue(100 * s.survivor_pct)
         self.taxable.setValue(100 * s.federal_taxable_pct)
@@ -678,15 +803,26 @@ class IncomeForm(ItemForm):
         s.amount = self.amount.value()
         s.start = self.start.value()
         s.end = self.end.value()
+        s.cola = self.cola.currentData()
         s.growth = self.growth.value() / 100
         s.survivor_pct = self.survivor.value() / 100
         s.federal_taxable_pct = self.taxable.value() / 100
 
     def update_rows(self) -> None:
-        self.show_row(self.survivor, self.kind.currentData() in SURVIVOR_KINDS)
+        kind = self.kind.currentData()
+        self.show_row(self.survivor, kind in SURVIVOR_KINDS)
+        # Wages, pensions and annuities have a COLA; other income a yearly increase.
+        word = "COLA" if kind in COLA_INCOME_KINDS else "Yearly increase"
+        self.form.labelForField(self.cola).setText(word)
+        self.cola.setAccessibleName(word)
+        rate = "COLA rate" if kind in COLA_INCOME_KINDS else "Yearly increase rate"
+        self.form.labelForField(self.growth).setText(rate)
+        self.growth.setAccessibleName(rate)
+        self.show_row(self.growth, self.cola.currentData() == "fixed")
+        self.show_row(self.cola_note, kind in SURVIVOR_KINDS)
         if self.plan is not None:
             start = self.start.value()
-            self.end.set_min_year(start.resolve(self.plan.profile) if start else None)
+            self.end.set_min_year(start.resolve(self.plan.profile, start=True) if start else None)
 
 
 class PersonForm(ItemForm):
@@ -694,18 +830,18 @@ class PersonForm(ItemForm):
         super().__init__()
         self.fra = self.row("Benefit at full retirement age", money_box(),
                             "Yearly benefit at full retirement age, in today's dollars (from your SSA statement)")
+        # Clergy and some government workers have no benefit of their own.
+        self.fra.setSpecialValueText("No Social Security")
+        self.fra.setMaximumWidth(170)
         self.claim = self.row("Claiming age", AgeEdit(62, 70),
                               "Years and months; the benefit starts that many months into the year")
         self.claimed = self.row("Already claimed", QCheckBox("Benefit is already being paid"))
         self.current = self.row("Yearly benefit now", money_box())
         self.ssdi = self.row("Disability", QCheckBox("Receiving SSDI"))
         self.ssdi_end = self.row("SSDI ends at age", OptionalField("At full retirement age", AgeEdit(17, 67)))
-        death = SpinBox()
-        death.setRange(50, 120)
-        death.setMaximumWidth(80)
-        self.death = self.row("Life expectancy", OptionalField("Lives to the end of the plan", death),
-                              "Age at death in the plan; the survivor files single after")
-        self.watch(self.fra, self.claim, self.claimed, self.current, self.ssdi, self.ssdi_end, self.death)
+        self.cola_note = self.info_row("Social Security COLA")
+        self.life_note = self.info_row("Life expectancy")
+        self.watch(self.fra, self.claim, self.claimed, self.current, self.ssdi, self.ssdi_end)
 
     def fill(self) -> None:
         pp: PersonPlan = self.obj
@@ -716,7 +852,6 @@ class PersonForm(ItemForm):
         self.current.setValue(ss.current_benefit or 0)
         self.ssdi.setChecked(ss.ssdi)
         self.ssdi_end.set_value(ss.ssdi_end_age, self._fra())
-        self.death.set_value(pp.death_age, self.plan.assumptions.end_age)
 
     def store(self) -> None:
         pp: PersonPlan = self.obj
@@ -726,7 +861,6 @@ class PersonForm(ItemForm):
         ss.current_benefit = self.current.value() if self.claimed.isChecked() else None
         ss.ssdi = self.ssdi.isChecked()
         ss.ssdi_end_age = self.ssdi_end.value()
-        pp.death_age = self.death.value()
 
     def _fra(self) -> float:
         assert self.plan is not None
@@ -735,7 +869,12 @@ class PersonForm(ItemForm):
     def update_rows(self) -> None:
         if self.plan is not None and self.obj is not None:
             self.ssdi_end.show_default(self._fra())
-            self.death.show_default(self.plan.assumptions.end_age)
+            same = " (same as inflation)" if self.plan.assumptions.ss_cola is None else ""
+            self.cola_note.setText(f"{100 * self.plan.ss_cola:.2f}%{same}\n"
+                                   "Change it in Assumptions ▸ Social Security COLA")
+            i = self.plan.people.index(self.obj)
+            p = self.plan.profile.people[i]
+            self.life_note.setText(f"{p.life_expectancy} ({self.plan.death_year(i)})\nChange it on the Baseline tab")
         claimed = self.claimed.isChecked()
         self.show_row(self.current, claimed)
         self.show_row(self.ssdi_end, self.ssdi.isChecked())
@@ -749,12 +888,18 @@ class RuleForm(ItemForm):
             self.kind.addItem(label, k)
         self.account = self.row("From account", ComboBox())
         self.to_account = self.row("Into", ComboBox())
-        self.start = self.row("Starts", WhenEdit())
+        self.start = self.row("Starts", WhenEdit(start=True))
         self.end = self.row("Ends (last year)", WhenEdit("Same year (one year only)"))
         self.mode = self.row("Amount", ComboBox())
         for k, label in MODE_LABELS.items():
             self.mode.addItem(label, k)
         self.amount = self.row("Each year", money_box())
+        self.growth = self.row("Yearly increase", ComboBox(),
+                               "Inflation: the amount is in today's dollars and grows with inflation. Fixed %: "
+                               "the amount is the first year's and grows by this rate each year after.")
+        for k, label in RULE_GROWTH_KINDS.items():
+            self.growth.addItem(label, k)
+        self.growth_rate = self.row("Increase rate", percent_box(-20, 20), "Negative for a falling amount")
         self.target = self.row("Fill up to", ComboBox())
         for label, t in FILL_TARGETS:
             self.target.addItem(label, t)
@@ -762,7 +907,7 @@ class RuleForm(ItemForm):
         self.deadline = self.note_row("Deadline")
         self.note = self.row("Note", QLineEdit())
         self.watch(self.kind, self.account, self.to_account, self.start, self.end, self.mode, self.amount,
-                   self.target, self.magi, self.note)
+                   self.growth, self.growth_rate, self.target, self.magi, self.note)
 
     def _accounts(self, kind: str) -> list[tuple[str, str]]:
         assert self.plan is not None
@@ -786,6 +931,8 @@ class RuleForm(ItemForm):
             w.set_value(when)
         self.mode.setCurrentIndex(max(0, self.mode.findData(r.mode)))
         self.amount.setValue(r.amount)
+        self.growth.setCurrentIndex(max(0, self.growth.findData(r.growth)))
+        self.growth_rate.setValue(100 * r.growth_rate)
         if r.target.startswith("magi:"):
             self.target.setCurrentIndex(self.target.findData("magi"))
             self.magi.setValue(_float(r.target[5:]))
@@ -810,6 +957,8 @@ class RuleForm(ItemForm):
         r.end = self.end.value()
         r.mode = self.mode.currentData()
         r.amount = self.amount.value()
+        r.growth = self.growth.currentData()
+        r.growth_rate = self.growth_rate.value() / 100
         t = self.target.currentData()
         r.target = f"magi:{self.magi.value():.0f}" if t == "magi" else t
         r.note = self.note.text()
@@ -817,13 +966,14 @@ class RuleForm(ItemForm):
     def update_rows(self) -> None:
         mode = self.mode.currentData()
         acct = self.plan.account(self.account.currentData()) if self.plan is not None else None
-        deadline = acct.deadline_year if acct is not None else None
+        deadline = acct.deadline_year(self.plan.profile) if acct is not None else None
         # A rule on a 10-year-rule inherited IRA can't run past the deadline.
         self.start.set_max_year(deadline)
         self.end.set_max_year(deadline)
         if self.plan is not None:
             start = self.start.value()
-            self.end.set_min_year(max(start.resolve(self.plan.profile), self.plan.start_year) if start else None)
+            self.end.set_min_year(max(start.resolve(self.plan.profile, start=True), self.plan.start_year)
+                                  if start else None)
         self.show_row(self.deadline, deadline is not None)
         if deadline is not None:
             self.deadline.setText(f"10-year rule: ends by {deadline} at the latest")
@@ -831,6 +981,8 @@ class RuleForm(ItemForm):
                                      "can't run past it and 1/N counts the years to then.")
         self.show_row(self.to_account, self.kind.currentData() == "roth_conversion")
         self.show_row(self.amount, mode == "fixed")
+        self.show_row(self.growth, mode == "fixed")
+        self.show_row(self.growth_rate, mode == "fixed" and self.growth.currentData() == "fixed")
         self.show_row(self.target, mode == "fill")
         self.show_row(self.magi, mode == "fill" and self.target.currentData() == "magi")
 
@@ -838,15 +990,19 @@ class RuleForm(ItemForm):
 class AssumptionsForm(ItemForm):
     def __init__(self) -> None:
         super().__init__()
-        self.inflation = self.row("Inflation", OptionalField("Use the baseline's inflation", percent_box(-1, 15)))
+        self.inflation = self.info_row("Inflation")
         self.cola = self.row("Social Security COLA", OptionalField("Same as inflation", percent_box(-1, 15)))
         self.ret = self.row("Default return (nominal)", percent_box(-20, 30),
                             "For accounts without a return of their own. " + NOMINAL_TIP)
         self.cash = self.row("Cash return (nominal)", percent_box(-5, 20),
                              "What every Cash / savings account earns, taxed as interest. Nominal, before inflation")
         self.spending = self.row("Yearly spending", money_box(), "In today's dollars; grows with inflation")
-        self.end_age = self.row("Plan runs to age", SpinBox())
-        self.end_age.setRange(60, 120)
+        self.survivor = self.row("Spending after the first death", percent_box(0, 200, 5),
+                                 "The survivor's spending, as a share of the couple's")
+        self.order = self.row("Pay for spending from", SpendingOrderEdit(),
+                              "When income falls short, money comes from the ticked account types, top first "
+                              "(several accounts of one type: in list order). Unticked types are never used "
+                              "for spending; withdrawals from them need a strategy.")
         magi_tip = ("Form 1040 line 11 (AGI) plus line 2a (tax-exempt interest). Sets Medicare premiums "
                     "(IRMAA) two years later. Not entered: no IRMAA is charged in the plan's first year, and "
                     "the second year uses the plan's own first-year MAGI.")
@@ -854,18 +1010,18 @@ class AssumptionsForm(ItemForm):
         self.magi2 = self.row("IRMAA MAGI last year", money_box(), magi_tip)
         for box in (self.magi1, self.magi2):
             box.setSpecialValueText("Not entered")
-        self.watch(self.inflation, self.cola, self.ret, self.cash, self.spending, self.end_age, self.magi1,
+        self.watch(self.cola, self.ret, self.cash, self.spending, self.survivor, self.order, self.magi1,
                    self.magi2)
 
     def fill(self) -> None:
         a = self.obj
         y = self.plan.start_year
-        self.inflation.set_value(None if a.inflation is None else 100 * a.inflation, 100 * self.plan.profile.inflation)
         self.cola.set_value(None if a.ss_cola is None else 100 * a.ss_cola, 100 * self.plan.inflation)
         self.ret.setValue(100 * a.return_rate)
         self.cash.setValue(100 * a.cash_return)
         self.spending.setValue(a.spending)
-        self.end_age.setValue(a.end_age)
+        self.survivor.setValue(100 * a.survivor_spending_pct)
+        self.order.set_value(a.spending_order)
         self.magi1.setValue(a.prior_magi.get(str(y - 2), 0))
         self.magi2.setValue(a.prior_magi.get(str(y - 1), 0))
         for box, year in ((self.magi1, y - 2), (self.magi2, y - 1)):
@@ -875,12 +1031,12 @@ class AssumptionsForm(ItemForm):
     def store(self) -> None:
         a = self.obj
         y = self.plan.start_year
-        a.inflation = None if self.inflation.value() is None else self.inflation.value() / 100
         a.ss_cola = None if self.cola.value() is None else self.cola.value() / 100
         a.return_rate = self.ret.value() / 100
         a.cash_return = self.cash.value() / 100
         a.spending = self.spending.value()
-        a.end_age = self.end_age.value()
+        a.survivor_spending_pct = self.survivor.value() / 100
+        a.spending_order = self.order.value()
         for year, box in ((y - 2, self.magi1), (y - 1, self.magi2)):
             if box.value():
                 a.prior_magi[str(year)] = box.value()
@@ -889,8 +1045,9 @@ class AssumptionsForm(ItemForm):
 
     def update_rows(self) -> None:
         if self.plan is not None:
-            self.inflation.show_default(100 * self.plan.profile.inflation)
+            self.inflation.setText(f"{100 * self.plan.inflation:.2f}%\nChange it on the Baseline tab")
             self.cola.show_default(100 * self.plan.inflation)
+            self.show_row(self.survivor, len(self.plan.profile.people) > 1)
 
 
 # -- the list ------------------------------------------------------------------------
@@ -1101,14 +1258,15 @@ class PlanEditor(QWidget):
         tip = ""
         if key == "accounts":
             text = f"{obj.label(profile)}  {short_money(obj.balance)}"
-            last = obj.deadline_year or y1
+            deadline = obj.deadline_year(profile)
+            last = deadline or y1
             if obj.kind == "inherited_ira":
                 color = "#008300"
-                tip = f"Must be empty by {obj.deadline_year}" if obj.deadline_year else ""
+                tip = f"Must be empty by {deadline}" if deadline else ""
             bar = (y0, last, color, 0)
         elif key == "incomes":
             text = f"{obj.label(profile)}  {short_money(obj.amount)}"
-            first = obj.start.resolve(profile) if obj.start else y0
+            first = obj.start.resolve(profile, start=True) if obj.start else y0
             last = obj.end.resolve(profile) if obj.end else y1
             bar = (first, last, INCOME_COLORS.get(obj.kind, color), 0)
             tip = f"{first}–{last}" if first != last else str(first)
@@ -1116,17 +1274,24 @@ class PlanEditor(QWidget):
             i = plan.people.index(obj)
             p = profile.people[i]
             ss = obj.social_security
+            spouse = plan.people[1 - i].social_security if len(plan.people) == 2 else None
             if ss.current_benefit is not None:
                 claim_text = f"Social Security {short_money(ss.current_benefit)} now"
                 first = y0
+            elif ss.fra_benefit <= 0 and not ss.ssdi:
+                spousal = spouse is not None and spouse.fra_benefit > 0
+                claim_text = f"spousal only, claims at {age_text(ss.claim_age)}" if spousal else "No Social Security"
+                first = p.birth_year + int(ss.claim_age)
             else:
                 claim_text = f"claims at {age_text(ss.claim_age)}"
                 first = p.birth_year + int(ss.claim_age)
-            death = obj.death_age
-            text = f"{p.name}: {claim_text}" + (f", to age {death}" if death else "")
-            last = plan.death_year(i) or y1
-            bar = (first, last, color, 0)
-            tip = f"Social Security {first}–{last}"
+            text = f"{p.name}: {claim_text}, to age {p.life_expectancy}"
+            last = plan.death_year(i)
+            if claim_text == "No Social Security":
+                tip = f"No Social Security; lives to {last}"
+            else:
+                bar = (first, last, color, 0)
+                tip = f"Social Security {first}–{last}"
         elif key == "rules":
             acct = plan.account(obj.account)
             name = acct.label(profile) if acct else obj.account
@@ -1234,9 +1399,9 @@ class PlanEditor(QWidget):
             plan.accounts.append(obj)
         elif what in ("income", "one_time"):
             if what == "income":
-                obj = IncomeStream(kind="pension", amount=0.0, owner=0)
+                obj = IncomeStream(kind="pension", amount=0.0, owner=0, cola="none")
             else:
-                obj = IncomeStream(kind="ltcg", amount=0.0, owner=None, name="One-time income",
+                obj = IncomeStream(kind="ltcg", amount=0.0, owner=None, name="One-time income", cola="none",
                                    start=When(year=y0 + 1), end=When(year=y0 + 1))
             plan.incomes.append(obj)
         else:

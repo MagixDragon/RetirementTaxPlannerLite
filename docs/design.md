@@ -194,18 +194,29 @@ filing status (issue #2).
 
 ![Forward-looking graph for the example plan](images/forward-example.png)
 
-A plan is the baseline profile (people, filing status, state, inflation)
-plus accounts, income streams, Social Security choices, life expectancy,
-assumptions and a short rule list. It is saved as JSON; see
+A plan is the baseline profile (people, birth years, life expectancies,
+filing status, state, inflation) plus accounts, income streams, Social
+Security choices, assumptions and a short rule list. Each plan file keeps
+its own copy of the baseline, so two scenarios can differ in who dies
+when (for example the younger spouse dying first). The plan ends when the
+last person dies; there is one inflation rate, the baseline's.
+
+Plan files carry `schema_version` (now 2). Version 1 files (app 0.2.x)
+still open: each person's `death_age` (or the old plan end age) becomes
+their life expectancy, a plan-level inflation override becomes the
+baseline's inflation, an income's `growth` becomes a "Fixed %" COLA (or
+"None" at 0%), and the eligible designated beneficiary tick box becomes
+the beneficiary choice. Saving writes version 2. It is saved as JSON; see
 `examples/plans/couple_conversions_inherited.json`. The app's **Forward
 plan** page opens plan files. `rtpl-plan` draws the same graphs and
 writes the year table as CSV.
 
 ### Editing a plan in the app
 
-On the Forward plan page the left panel has two tabs: **Plan items** and
-**Baseline** (the profile). Plan items is a list grouped into Accounts,
-Income, Social Security, Strategies and Assumptions; each row has a bar
+On the Forward plan page the left panel has two tabs: **Baseline** (the
+profile, including each person's life expectancy, default 95) and **Plan
+items**. Plan items is a list grouped into Assumptions, Accounts, Income,
+Social Security and Strategies; each row has a bar
 across the years it covers on the plan's year axis. The selected row's
 form sits under the list, and every edit is written into the plan at once
 and recalculates it a quarter second after the last keystroke. The
@@ -219,8 +230,13 @@ final balances.
 * **Plan name.** A plan has its own free-form name beside the baseline's
   name; the summary, chart titles and the suggested file name use both
   ("Smith household - Roth conversions until SS.plan.json").
-* **Timings** are entered as a person's age or a calendar year, and the
-  form shows the other form next to it ("= 2031").
+* **Timings** are entered as a person's age, a calendar year, a death
+  ("Alex dies", "First death") or "End of plan", and the form shows the
+  year next to it ("= 2031"). As a start, a death means the year after it
+  ("After Alex dies"): the first year without that person.
+* **Values set elsewhere** show greyed on the panel with where to change
+  them: the Social Security COLA on each Social Security panel, inflation
+  on Assumptions, life expectancy on Social Security.
 * **Account ids** are made up by the app (`p1_traditional_ira`); deleting
   an account also deletes the strategies that use it, after asking.
 * The design for the rest of the editor (milestones, year overrides,
@@ -229,10 +245,12 @@ final balances.
 
 ### Design decisions
 
-* **Rules only, balances tracked.** Balances grow and drive RMDs and
-  "fill to a target" conversions, but money comes out of an account only
-  where an RMD or a rule says so. Spending-driven withdrawals (a spending
-  target with a withdrawal order) are a later step that fits this model.
+* **Rules first, then a spending order.** Balances grow and drive RMDs and
+  "fill to a target" conversions. Money comes out of an account where an
+  RMD or a rule says so, and, when income falls short of spending and
+  tax, from the account types ticked in Assumptions ▸ Pay for spending
+  from, in order (cash, then brokerage, by default; traditional, inherited,
+  Roth and HSA can be added).
 * **Ages** are the age reached by December 31. A timing is stored as one
   person's age (or a calendar year if the user prefers) and can be shown as
   the other person's age or the year.
@@ -244,12 +262,12 @@ final balances.
 
 | Item | Fields |
 |---|---|
-| Account | id, type (traditional IRA, 401(k)/403(b), inherited IRA, Roth IRA, Roth 401(k), HSA, taxable brokerage, cash), owner, balance, optional return; taxable: cost basis and yields (interest, qualified and non-qualified dividends, capital gain distributions); traditional: spouse is sole beneficiary; inherited: year inherited, original owner's birth year, whether they had started RMDs, eligible designated beneficiary |
-| Income stream | wages, pension, foreign pension, annuity, interest, qualified dividends, long-term gain, other ordinary, tax-exempt; owner, yearly amount in the first year paid, start and end (age or year; one year for a one-off), growth (COLA or raises; pensions default to 0%), survivor %, federal taxable % |
+| Account | id, type (traditional IRA, 401(k)/403(b), inherited IRA, Roth IRA, Roth 401(k), HSA, taxable brokerage, cash), owner, balance, optional return; taxable: cost basis and yields (interest, qualified and non-qualified dividends, capital gain distributions); traditional: spouse is sole beneficiary; inherited: year inherited, original owner's birth year, whether they had started RMDs, who inherited it (spouse, minor child, disabled or chronically ill, not more than 10 years younger, other person, estate or trust) |
+| Income stream | wages, pension, foreign pension, annuity, interest, qualified dividends, long-term gain, other ordinary, tax-exempt; owner, yearly amount in the first year paid, start and end (age, year, a death or the end of the plan; one year for a one-off), COLA (None, Inflation, Social Security COLA or Fixed %; "yearly increase" for interest, dividends and other income), survivor %, federal taxable % |
 | Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI, with an optional early end age (a claiming age past FRA suspends SSDI's retirement benefit until then) |
-| Person | death age (optional) |
-| Assumptions | inflation, Social Security COLA, default return and cash return (nominal, before inflation; every cash account earns the cash return), yearly spending (today's dollars), plan end age, MAGI for the two years before the plan (for IRMAA) |
-| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance |
+| Person (on the baseline) | birth year, life expectancy (default 95) |
+| Assumptions | Social Security COLA (default: inflation), default return and cash return (nominal, before inflation; every cash account earns the cash return), yearly spending (today's dollars), spending after the first death (% of the couple's), the spending order, MAGI for the two years before the plan (for IRMAA) |
+| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance. A fixed amount can stay flat, grow with inflation (entered in today's dollars) or grow by a fixed % a year after the rule's first year (negative for a glide path down) |
 
 **Overrides.** For each account and kind of rule, the rule with the
 narrowest span wins in a year (ties go to the later rule). So "fill to 22%,
@@ -268,7 +286,15 @@ account, so an RMD counts toward it; conversions come on top of RMDs.
    (non-recalculating, from the year after death, using the longer of the
    beneficiary's and the owner's remaining expectancy) when the owner had
    started RMDs or the beneficiary is eligible to stretch, and the whole
-   balance in the 10-year deadline year.
+   balance in the deadline year. The rule comes from who inherited it and
+   the year of death: deaths before 2020 stretch for any person; from
+   2020 a spouse, a disabled or chronically ill person, or someone not
+   more than 10 years younger stretches; a minor child stretches until 21
+   and then has 10 years; anyone else has the 10-year rule. An estate or
+   trust has the 5-year rule if the owner died before their RMDs started,
+   otherwise yearly RMDs over the owner's remaining life expectancy. When
+   a stretching beneficiary dies in the plan, the spouse who takes the
+   account over must empty it within 10 years.
 3. **Income.** Streams, taxable-account yields (reinvested) and cash
    interest.
 4. **Social Security.** Own benefit with early-claiming reductions or
@@ -291,10 +317,13 @@ account, so an RMD counts toward it; conversions come on top of RMDs.
 6. **Tax.** `compute_tax()` with that year's law (projected past the newest
    data file), the year's filing status (joint through the year of death,
    then single), and inflation-indexed adjustments and itemized deductions.
-7. **Cash flow.** Income minus spending, tax and IRMAA surcharges. A surplus
-   goes into the taxable account (or cash); a deficit is taken from cash,
-   then the taxable account, realizing gains in proportion to the basis,
-   which feeds back into the tax (iterated). Anything still short is
+7. **Cash flow.** Income minus spending, tax and IRMAA surcharges; after
+   the first death a couple's spending is the survivor's share. A surplus
+   goes into the taxable account (or cash); a deficit is taken from the
+   account types in the spending order (by default cash, then the taxable
+   account), realizing gains in proportion to the basis; withdrawals from
+   traditional accounts are ordinary income. Both feed back into the tax
+   (iterated, so a withdrawal also pays its own tax). Anything still short is
    reported as a shortfall in the graph's notes and the year table.
 8. **IRMAA.** Premiums in year *Y* use MAGI from *Y − 2* (the plan's own
    years, or the MAGI entered for the years before the plan) and that

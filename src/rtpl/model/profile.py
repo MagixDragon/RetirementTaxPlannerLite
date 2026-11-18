@@ -26,6 +26,10 @@ FILING_STATUS_LABELS = {
 class Person:
     name: str = "Person 1"
     birth_year: int = 1960
+    # Age at death in the forward plan (alive through the year they reach
+    # it). The plan ends when the last person dies. The marginal graph
+    # doesn't use it.
+    life_expectancy: int = 95
     # None means "work it out from age" (enrolled at 65+). Set True for
     # people on Medicare before 65 (for example SSDI recipients), or False
     # for people 65+ who are not enrolled in Part B.
@@ -74,8 +78,8 @@ class Profile:
     household: Household = field(default_factory=Household)
     name: str = "My plan"
     # Inflation used to project tax law for years with no data file yet
-    # (for example the IRMAA brackets two years out). Also the starting
-    # point for the forward-looking plan's assumptions.
+    # (for example the IRMAA brackets two years out), and the forward
+    # plan's one inflation rate.
     inflation: float = 0.025
     schema_version: int = SCHEMA_VERSION
 
@@ -100,7 +104,8 @@ class Profile:
     @classmethod
     def from_dict(cls, data: dict) -> "Profile":
         data = dict(data)
-        people = [Person(**p) for p in data.pop("people", [])] or [Person()]
+        fields = Person.__dataclass_fields__
+        people = [Person(**{k: v for k, v in p.items() if k in fields}) for p in data.pop("people", [])] or [Person()]
         household = Household(**data.pop("household", {}))
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(people=people, household=household, **known)

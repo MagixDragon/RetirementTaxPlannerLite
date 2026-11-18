@@ -1,4 +1,5 @@
 {
+  "schema_version": 2,
   "profile": {
     "name": "Couple with conversions and an inherited IRA",
     "year": 2026,
@@ -8,11 +9,13 @@
     "people": [
       {
         "name": "Alex",
-        "birth_year": 1964
+        "birth_year": 1964,
+        "life_expectancy": 88
       },
       {
         "name": "Sam",
-        "birth_year": 1966
+        "birth_year": 1966,
+        "life_expectancy": 94
       }
     ],
     "household": {
@@ -24,15 +27,13 @@
       "social_security": {
         "fra_benefit": 38000,
         "claim_age": 70
-      },
-      "death_age": 88
+      }
     },
     {
       "social_security": {
         "fra_benefit": 16000,
         "claim_age": 62
-      },
-      "death_age": 94
+      }
     }
   ],
   "accounts": [
@@ -89,7 +90,8 @@
         "age": 60,
         "person": 1
       },
-      "growth": 0.03
+      "growth": 0.03,
+      "cola": "fixed"
     },
     {
       "kind": "pension",
@@ -99,7 +101,8 @@
         "age": 65,
         "person": 0
       },
-      "survivor_pct": 0.5
+      "survivor_pct": 0.5,
+      "cola": "none"
     },
     {
       "kind": "foreign_pension",
@@ -110,7 +113,8 @@
         "age": 67,
         "person": 0
       },
-      "growth": 0.025
+      "growth": 0.025,
+      "cola": "fixed"
     },
     {
       "kind": "ltcg",
@@ -122,7 +126,8 @@
       },
       "end": {
         "year": 2031
-      }
+      },
+      "cola": "none"
     }
   ],
   "rules": [
@@ -170,8 +175,7 @@
         "person": 0
       },
       "end": {
-        "age": 100,
-        "person": 0
+        "event": "last_death"
       },
       "mode": "fixed",
       "amount": 90000,
@@ -182,7 +186,6 @@
     "return_rate": 0.05,
     "cash_return": 0.03,
     "spending": 110000,
-    "end_age": 95,
     "prior_magi": {
       "2024": 150000,
       "2025": 160000

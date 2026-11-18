@@ -95,6 +95,9 @@ class PersonBox(QGroupBox):
         self.birth_year.setMaximumWidth(80)
         self.age = QLabel()
         self.age.setAccessibleName("Calculated age")
+        self.life = SpinBox()
+        self.life.setRange(50, 120)
+        self.life.setMaximumWidth(80)
         self._tax_year = 2026
         self.medicare = ComboBox()
         for text, _ in MEDICARE_CHOICES:
@@ -106,6 +109,9 @@ class PersonBox(QGroupBox):
         self.birth_year.setAccessibleName("Birth year")
         form.addRow(birth_label, self.birth_year)
         form.addRow("", self.age)
+        _add_row(form, "Life expectancy", self.life,
+                 "Age at death in the forward plan; the survivor files single after, and the plan ends "
+                 "when the last person dies. Each plan keeps its own copy. Not used by the marginal graph.")
         _add_row(
             form,
             "Medicare Part B",
@@ -122,6 +128,7 @@ class PersonBox(QGroupBox):
         self.name.textChanged.connect(self.changed)
         self.birth_year.valueChanged.connect(self.changed)
         self.birth_year.valueChanged.connect(self._update_age)
+        self.life.valueChanged.connect(self.changed)
         self.medicare.currentIndexChanged.connect(self.changed)
         self.blind.toggled.connect(self.changed)
 
@@ -136,6 +143,7 @@ class PersonBox(QGroupBox):
     def set_person(self, p: Person) -> None:
         self.name.setText(p.name)
         self.birth_year.setValue(p.birth_year)
+        self.life.setValue(p.life_expectancy)
         self.medicare.setCurrentIndex([v for _, v in MEDICARE_CHOICES].index(p.medicare_part_b))
         self.blind.setChecked(p.blind)
         for key, box in self.money.items():
@@ -145,6 +153,7 @@ class PersonBox(QGroupBox):
         return Person(
             name=self.name.text() or self.title(),
             birth_year=self.birth_year.value(),
+            life_expectancy=self.life.value(),
             medicare_part_b=MEDICARE_CHOICES[self.medicare.currentIndex()][1],
             blind=self.blind.isChecked(),
             **{k: b.value() for k, b in self.money.items()},
@@ -182,16 +191,16 @@ class ProfileForm(QWidget):
         _add_row(form, "State of residence", self.state, "Optional. Adds a state tax layer.")
         self.inflation = DoubleSpinBox()
         self.inflation.setSuffix("%")
-        self.inflation.setDecimals(1)
+        self.inflation.setDecimals(2)
         self.inflation.setRange(0.0, 15.0)
         self.inflation.setSingleStep(0.1)
-        self.inflation.setMaximumWidth(80)
+        self.inflation.setMaximumWidth(90)
         _add_row(
             form,
             "Inflation rate",
             self.inflation,
             "Yearly inflation used to project tax law for years with no data yet, "
-            "such as the IRMAA brackets two years ahead.",
+            "such as the IRMAA brackets two years ahead. The forward plan uses it too.",
         )
         outer.addWidget(basics)
 

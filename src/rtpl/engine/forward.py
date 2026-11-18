@@ -13,8 +13,11 @@ Each year:
    "fill to a target" rules, each solved against the full tax return.
 5. Tax with ``compute_tax()`` and that year's (possibly projected) law.
 6. Cash flow: income minus spending, tax and IRMAA surcharges. A surplus
-   goes into the taxable account; a deficit is taken from cash, then the
-   taxable account (realizing gains, which feeds back into the tax).
+   goes into the taxable account; a deficit is taken from the account
+   types in the plan's spending order (by default cash, then the taxable
+   account). Gains realized on sales and withdrawals from traditional
+   accounts feed back into the tax, so this is solved by iteration.
+   After the first death a couple's spending is the survivor's share.
 7. Balances grow by their return.
 
 Threshold lines for the chart (bracket tops, IRMAA tiers, ACA) are given in
@@ -32,7 +35,7 @@ import copy
 import math
 from dataclasses import dataclass, field
 
-from rtpl.model.plan import Account, Plan, Rule
+from rtpl.model.plan import ROTH_KINDS, TRADITIONAL_KINDS, Account, Plan, Rule
 from rtpl.model.profile import Household, Person, Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
@@ -190,11 +193,14 @@ class PlanEngine:
         self.tables = tables or default_tables()
         self.profile = plan.profile
         self.state_law: StateLaw | None = library.state(plan.profile.state) if plan.profile.state else None
+        # Inherited IRA deadlines; a successor beneficiary of a stretching
+        # account gets a new 10-year deadline when the first one dies.
+        self.deadlines: dict[str, int | None] = {a.id: a.deadline_year(plan.profile) for a in plan.accounts}
+        self.inherited_rules = {a.id: a.inherited_rule(plan.profile) for a in plan.accounts}
 
     # -- people ----------------------------------------------------------
     def alive(self, i: int, year: int) -> bool:
-        dy = self.plan.death_year(i)
-        return dy is None or year <= dy
+        return year <= self.plan.death_year(i)
 
     def living(self, year: int) -> list[int]:
         return [i for i in range(len(self.profile.people)) if self.alive(i, year)]
@@ -293,11 +299,11 @@ class PlanEngine:
 
     # -- incomes ---------------------------------------------------------
     def stream_amount(self, s, year: int) -> float:
-        first = s.start.resolve(self.profile) if s.start else self.plan.start_year
+        first = s.start.resolve(self.profile, start=True) if s.start else self.plan.start_year
         last = s.end.resolve(self.profile) if s.end else 10**6
         if not first <= year <= last:
             return 0.0
-        amount = s.amount * (1 + s.growth) ** (year - max(first, self.plan.start_year))
+        amount = s.amount * (1 + s.rate(self.plan)) ** (year - max(first, self.plan.start_year))
         if s.owner is not None and s.owner < len(self.profile.people) and not self.alive(s.owner, year):
             if s.kind in ("pension", "foreign_pension", "annuity"):
                 return amount * s.survivor_pct
@@ -320,18 +326,24 @@ class PlanEngine:
             period = self.tables.owner_period(age, spouse_age, acct.spouse_sole_beneficiary)
             return balance / period
         if acct.kind == "inherited_ira" and acct.inherited_year is not None:
-            deadline = acct.deadline_year
+            rule = self.inherited_rules.get(acct.id) or acct.inherited_rule(self.profile)
+            deadline = self.deadlines.get(acct.id)
             if deadline is not None and year >= deadline:
                 return balance
             if year <= acct.inherited_year:
                 return 0.0
-            if not (acct.owner_started_rmds or acct.eligible_designated_beneficiary):
+            if not rule.annual_rmds:
                 return 0.0
             if acct.id not in first_periods:
-                first_periods[acct.id] = inherited_first_period(
-                    self.tables, owner.birth_year, acct.inherited_year,
-                    acct.original_owner_birth_year, acct.owner_started_rmds,
-                )
+                if rule.owner_life and acct.original_owner_birth_year is not None:
+                    # An estate or trust: the owner's remaining life expectancy.
+                    first_periods[acct.id] = self.tables.single_period(
+                        acct.inherited_year - acct.original_owner_birth_year) - 1
+                else:
+                    first_periods[acct.id] = inherited_first_period(
+                        self.tables, owner.birth_year, acct.inherited_year,
+                        acct.original_owner_birth_year, acct.owner_started_rmds,
+                    )
             period = first_periods[acct.id] - (year - acct.inherited_year - 1)
             return balance if period <= 1 else balance / period
         return 0.0
@@ -432,6 +444,7 @@ class PlanEngine:
     # -- the run ---------------------------------------------------------
     def run(self, *, with_lines: bool = True) -> PlanResult:
         plan, profile = self.plan, self.profile
+        self.deadlines = {a.id: a.deadline_year(profile) for a in plan.accounts}
         accounts = [copy.deepcopy(a) for a in plan.accounts]
         by_id = {a.id: a for a in accounts}
         bal = {a.id: a.balance for a in accounts}
@@ -466,11 +479,17 @@ class PlanEngine:
             living = self.living(year)
             if not living:
                 break
+            notes_next: list[str] = []
             # 1. accounts of someone who died last year pass to the survivor
             for a in accounts:
                 if a.owner is not None and not self.alive(a.owner, year):
                     surv = self.survivor_of(a.owner, year)
                     if surv is not None:
+                        if a.kind == "inherited_ira" and self.deadlines.get(a.id) is None:
+                            # A successor beneficiary of a stretching account has 10 years.
+                            self.deadlines[a.id] = self.plan.death_year(a.owner) + 10
+                            notes_next.append(f"{labels[a.id]}: passes to {profile.people[surv].name}, who must "
+                                              f"empty it by {self.deadlines[a.id]}")
                         a.owner = surv
                         labels[a.id] = a.label(profile) + " (inherited from spouse)" if not a.name else labels[a.id]
                         if a.kind == "roth_ira":
@@ -481,7 +500,7 @@ class PlanEngine:
             y = _Year()
             sources: list[Source] = []
             withdrawn: dict[str, float] = {a.id: 0.0 for a in accounts}
-            notes: list[str] = []
+            notes: list[str] = notes_next
 
             def take_from(acct: Account, amount: float, category: str, label: str) -> float:
                 amount = max(0.0, min(amount, bal[acct.id] - withdrawn[acct.id]))
@@ -503,8 +522,8 @@ class PlanEngine:
                     cat = "inherited" if a.kind == "inherited_ira" else "rmd"
                     what = "required withdrawal" if a.kind == "inherited_ira" else "RMD"
                     take_from(a, req, cat, f"{labels[a.id]} {what}")
-                    if a.deadline_year == year:
-                        notes.append(f"{labels[a.id]}: 10-year deadline, remaining balance withdrawn")
+                    if self.deadlines.get(a.id) == year:
+                        notes.append(f"{labels[a.id]}: deadline year, remaining balance withdrawn")
 
             # 3. incomes
             for s in plan.incomes:
@@ -592,37 +611,47 @@ class PlanEngine:
 
             # 5-6. tax and cash flow, iterating on gains from sales that pay for a deficit
             spending = plan.assumptions.spending * (1 + plan.inflation) ** (year - plan.start_year)
+            if len(profile.people) > 1 and len(living) < len(profile.people):
+                spending *= plan.assumptions.survivor_spending_pct
             surcharge, irmaa_note = self._irmaa(year, magi_history, living, fs)
-            sale_ltcg = 0.0
+            inflow = sum(s.amount for s in sources if s.key.startswith(("income:", "ss:")))
+            inflow += sum(s.amount for s in sources if s.category in ("rmd", "inherited", "ira_withdrawal", "roth_withdrawal"))
+            inflow += sum(amt for (_, amt, _) in sale_plan_other(sources))
+            # Sales and traditional withdrawals that pay for a deficit change
+            # the tax, which changes the deficit: iterate to a fixed point.
             sale_plan: list[tuple[str, float, float]] = []
-            for _ in range(6):
+            taxed = (0.0, 0.0)
+            for _ in range(20):
                 y_try = copy.deepcopy(y)
-                y_try.ltcg += sale_ltcg
+                self._add_cover_income(y_try, sale_plan, by_id, living)
                 prof = self.build_profile(year, y_try, fs)
                 tax = compute_tax(prof, law, self.state_law)
-                inflow = sum(s.amount for s in sources if s.key.startswith(("income:", "ss:")))
-                inflow += sum(s.amount for s in sources if s.category in ("rmd", "inherited", "ira_withdrawal", "roth_withdrawal"))
-                inflow += sum(amt for (_, amt, _) in sale_plan_other(sources))
-                outflow = spending + tax.total_tax + surcharge
-                net = inflow - outflow
-                new_plan, new_gain, short = self._cover_deficit(-net, accounts, bal, withdrawn, basis)
-                if abs(new_gain - sale_ltcg) < 1.0:
-                    sale_plan, sale_ltcg = new_plan, new_gain
+                net = inflow - (spending + tax.total_tax + surcharge)
+                new_plan, short = self._cover_deficit(-net, accounts, bal, withdrawn, basis)
+                new_taxed = _taxed_cover(new_plan, by_id)
+                done = all(abs(a - b) < 1.0 for a, b in zip(new_taxed, taxed))
+                sale_plan, taxed = new_plan, new_taxed
+                if done:
                     break
-                sale_plan, sale_ltcg = new_plan, new_gain
-            y.ltcg += sale_ltcg
-            prof = self.build_profile(year, y, fs)
-            tax = compute_tax(prof, law, self.state_law)
             shortfall = short if net < 0 else 0.0
             for acct_id, amount, gain in sale_plan:
-                withdrawn[acct_id] += amount
-                if gain > 0:
-                    sources.append(Source("realized_gains", f"sale:{acct_id}", f"{labels[acct_id]} gains on sales", gain))
-                if amount - gain > 0:
-                    sources.append(Source("principal", f"sale:{acct_id}", f"{labels[acct_id]} principal", amount - gain))
+                acct = by_id[acct_id]
+                if acct.kind in ("taxable", "cash"):
+                    withdrawn[acct_id] += amount
+                    y.ltcg += gain
+                    if gain > 0:
+                        sources.append(Source("realized_gains", f"sale:{acct_id}", f"{labels[acct_id]} gains on sales", gain))
+                    if amount - gain > 0:
+                        sources.append(Source("principal", f"sale:{acct_id}", f"{labels[acct_id]} principal", amount - gain))
+                else:
+                    cat = "inherited" if acct.kind == "inherited_ira" else "ira_withdrawal"
+                    take_from(acct, amount, cat, f"{labels[acct_id]} withdrawal for spending")
+            prof = self.build_profile(year, y, fs)
+            tax = compute_tax(prof, law, self.state_law)
             surplus = max(0.0, net) if net >= 0 else 0.0
             if shortfall > 0:
-                notes.append(f"Short ${shortfall:,.0f}: spending and tax exceed income and cash/brokerage")
+                notes.append(f"Short ${shortfall:,.0f}: spending and tax exceed income and the accounts in the "
+                             "spending order")
 
             # 7. balances
             for a in accounts:
@@ -693,10 +722,11 @@ class PlanEngine:
         # Conversions come on top of any RMD, which cannot be converted.
         already = withdrawn[acct.id] if r.kind == "withdrawal" else 0.0
         if r.mode == "fixed":
-            amount = r.amount - already
+            amount = r.fixed_amount(self.plan, year) - already
         elif r.mode == "spread":
-            if acct.deadline_year is not None:
-                last = min(last, acct.deadline_year)  # the 10-year rule empties it then anyway
+            deadline = self.deadlines.get(acct.id)
+            if deadline is not None:
+                last = min(last, deadline)  # the 10-year rule empties it then anyway
             amount = bal[acct.id] / max(1, last - year + 1) - already
         elif r.mode == "all":
             amount = available
@@ -749,25 +779,37 @@ class PlanEngine:
         take_from(acct, amount, cat, f"{labels[acct.id]} withdrawal")
 
     def _cover_deficit(self, deficit: float, accounts, bal, withdrawn, basis):
-        """Sell from cash, then taxable accounts. Returns (sales, realized gain, shortfall)."""
+        """Take a deficit from the account types in the spending order, each
+        in list order. Returns (takes as (account id, amount, gain), shortfall)."""
         sales: list[tuple[str, float, float]] = []
-        gain_total = 0.0
         need = max(0.0, deficit)
-        for kind in ("cash", "taxable"):
+        order = list(self.plan.assumptions.spending_order)
+        if "_cash" in bal and "cash" not in order:
+            order.insert(0, "cash")  # the hidden surplus account always pays back first
+        for source in order:
             for a in accounts:
-                if need <= 0 or a.kind != kind:
+                if need <= 0 or _spending_source(a) != source:
                     continue
                 avail = bal[a.id] - withdrawn[a.id]
                 take = min(need, max(0.0, avail))
                 if take <= 0:
                     continue
                 gain = 0.0
-                if kind == "taxable" and bal[a.id] > 0:
+                if a.kind == "taxable" and bal[a.id] > 0:
                     gain = take * max(0.0, 1 - basis.get(a.id, bal[a.id]) / bal[a.id])
                 sales.append((a.id, take, gain))
-                gain_total += gain
                 need -= take
-        return sales, gain_total, need
+        return sales, need
+
+    @staticmethod
+    def _add_cover_income(y: "_Year", takes, by_id, living: list[int]) -> None:
+        """Add the taxable income from deficit takes to a trial year."""
+        for acct_id, amount, gain in takes:
+            a = by_id[acct_id]
+            if a.kind == "taxable":
+                y.ltcg += gain
+            elif a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira":
+                y.add("ira", a.owner if a.owner is not None else living[0], amount)
 
     # -- IRMAA -----------------------------------------------------------
     def _irmaa(self, year: int, history: dict, living: list[int], fs: str) -> tuple[float, str]:
@@ -835,6 +877,26 @@ class PlanEngine:
         fpl = law.fpl(prof.fpl_household_size())
         line("aca:4", "ACA 400% of poverty line", lambda r: r.magi_aca, law.aca_cliff_pct * fpl)
         return out
+
+
+def _spending_source(a: Account) -> str | None:
+    """The spending-order type an account belongs to."""
+    if a.kind in ("cash", "taxable", "hsa"):
+        return a.kind
+    if a.kind in TRADITIONAL_KINDS:
+        return "traditional"
+    if a.kind == "inherited_ira":
+        return "inherited"
+    if a.kind in ROTH_KINDS:
+        return "roth"
+    return None
+
+
+def _taxed_cover(takes, by_id) -> tuple[float, float]:
+    """(realized gains, traditional withdrawals) in a set of deficit takes."""
+    gains = sum(g for i, _, g in takes if by_id[i].kind == "taxable")
+    ira = sum(amt for i, amt, _ in takes if by_id[i].kind in TRADITIONAL_KINDS or by_id[i].kind == "inherited_ira")
+    return gains, ira
 
 
 def sale_plan_other(sources: list[Source]):

@@ -238,8 +238,8 @@ class MainWindow(QMainWindow):
         # profile becomes its Baseline tab. Elsewhere only the profile shows.
         self.plan_editor = PlanEditor()
         self.input_tabs = PanelTabs()
-        self.input_tabs.addTab(self.plan_editor, "&Plan items")
         self.input_tabs.addTab(self.form, "&Baseline")
+        self.input_tabs.addTab(self.plan_editor, "&Plan items")
         self.inputs_panel = SidePanel("Inputs", self.input_tabs, Qt.Edge.LeftEdge)
         self.input_tabs.currentChanged.connect(self._size_input_tabs)
         # Center pages: the marginal graph, and the forward-looking plan
@@ -385,12 +385,13 @@ class MainWindow(QMainWindow):
     def _sync_input_tabs(self) -> None:
         """Show the Plan items tab only on the Forward plan page with a plan open."""
         show = self.pages.currentWidget() is self.plan_view and self.plan_view.plan is not None
-        was = self.input_tabs.isTabVisible(0)
-        self.input_tabs.setTabVisible(0, show)
+        items = self.input_tabs.indexOf(self.plan_editor)
+        was = self.input_tabs.isTabVisible(items)
+        self.input_tabs.setTabVisible(items, show)
         if show and not was:
-            self.input_tabs.setCurrentIndex(0)
+            self.input_tabs.setCurrentIndex(items)
         elif not show:
-            self.input_tabs.setCurrentIndex(1)
+            self.input_tabs.setCurrentIndex(self.input_tabs.indexOf(self.form))
         title = "Plan" if show else "Inputs"
         self.inputs_panel.title.setText(f"<b>{title}</b>")
         self.inputs_panel.setAccessibleName(title)

@@ -11,21 +11,28 @@ Design points (see docs/design.md, "Forward-looking plan"):
 * Rules move money between accounts (Roth conversions, withdrawals). For
   each account and kind of rule, the rule with the narrowest time span
   wins in a year, so a one-year rule overrides a range rule.
-* Withdrawals happen only where a rule (or an RMD) says so. Money left
-  over after spending and taxes goes into the taxable account; a deficit
-  is taken from cash, then the taxable account, and anything still short
-  is reported as a shortfall.
+* Withdrawals happen where a rule (or an RMD) says so. Money left over
+  after spending and taxes goes into the taxable account; a deficit is
+  taken from the account types in the spending order (cash, then the
+  taxable account, unless the plan says otherwise), and anything still
+  short is reported as a shortfall.
+* The plan keeps its own copy of the baseline (people, birth years, life
+  expectancies, inflation), so two plan files can differ in who dies when.
+
+Plan files carry a schema version. Older files are migrated on load (see
+``_migrate``); saving writes the current version.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from .profile import Profile
 
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
 
 ACCOUNT_KINDS = {
     "traditional_ira": "Traditional IRA",
@@ -52,6 +59,54 @@ INCOME_KINDS = {
     "tax_exempt": "Tax-exempt income",
 }
 
+# Who inherited an inherited IRA. The app works out the withdrawal rule
+# from this and the year the original owner died.
+BENEFICIARY_KINDS = {
+    "spouse": "Spouse",
+    "minor_child": "Minor child of the original owner",
+    "disabled": "Disabled or chronically ill",
+    "close_in_age": "Not more than 10 years younger than the owner",
+    "other": "Other person",
+    "estate": "Estate or trust",
+}
+# Eligible designated beneficiaries (deaths in 2020 or later): lifetime
+# withdrawals, no 10-year limit. A minor child stretches only until 21.
+EDB_KINDS = ("spouse", "disabled", "close_in_age")
+
+# How an income stream's amount rises after its first year.
+COLA_KINDS = {
+    "none": "None",
+    "inflation": "Inflation",
+    "ss_cola": "Social Security COLA",
+    "fixed": "Fixed %",
+}
+# Income kinds that are said to have a COLA (others have a yearly increase).
+COLA_INCOME_KINDS = ("wages", "pension", "foreign_pension", "annuity")
+
+# How a fixed-amount rule's amount changes from year to year.
+RULE_GROWTH_KINDS = {
+    "none": "None (the same dollars every year)",
+    "inflation": "Inflation (amount in today's dollars)",
+    "fixed": "Fixed % a year after the first year",
+}
+
+# Where money for spending comes from when income falls short, in order.
+SPENDING_SOURCES = {
+    "cash": "Cash / savings",
+    "taxable": "Taxable brokerage",
+    "traditional": "Traditional IRA / 401(k)",
+    "inherited": "Inherited IRA",
+    "roth": "Roth IRA / Roth 401(k)",
+    "hsa": "HSA",
+}
+DEFAULT_SPENDING_ORDER = ("cash", "taxable")
+
+# Timing events: points in time tied to deaths rather than an age or year.
+#   death:<i>    person i dies
+#   first_death  the first of the two to die
+#   last_death   the end of the plan (the last person dies)
+WHEN_EVENTS = ("death:0", "death:1", "first_death", "last_death")
+
 RULE_KINDS = {"roth_conversion": "Roth conversion", "withdrawal": "Withdrawal"}
 
 # How a rule decides its amount.
@@ -71,23 +126,50 @@ AMOUNT_MODES = {
 FILL_TARGET_HELP = "bracket:0.22, cg0, irmaa:1, aca:4.0 or magi:150000"
 
 
+def death_year(profile: Profile, i: int) -> int:
+    """The last year person ``i`` is alive in the plan."""
+    p = profile.people[min(i, len(profile.people) - 1)]
+    return p.birth_year + int(p.life_expectancy)
+
+
 @dataclass
 class When:
-    """A point in time: a person's age, or a calendar year."""
+    """A point in time: a person's age, a calendar year, or an event
+    (a death, or the end of the plan; see WHEN_EVENTS).
+
+    An event is the year of the death. As a start it means the year after
+    (the first year without that person); as an end, the death year itself.
+    """
 
     age: int | None = None
     person: int = 0
     year: int | None = None
+    event: str | None = None
 
-    def resolve(self, profile: Profile) -> int:
+    def resolve(self, profile: Profile, *, start: bool = False) -> int:
+        if self.event is not None:
+            return self.event_year(profile) + (1 if start else 0)
         if self.year is not None:
             return int(self.year)
         if self.age is None:
-            raise ValueError("A timing needs an age or a year")
+            raise ValueError("A timing needs an age, a year or an event")
         idx = min(self.person, len(profile.people) - 1)
         return profile.people[idx].birth_year + int(self.age)
 
-    def describe(self, profile: Profile) -> str:
+    def event_year(self, profile: Profile) -> int:
+        years = [death_year(profile, i) for i in range(len(profile.people))]
+        kind, _, arg = (self.event or "").partition(":")
+        if kind == "death":
+            return years[min(int(arg or 0), len(years) - 1)]
+        if kind == "first_death":
+            return min(years)
+        if kind == "last_death":
+            return max(years)
+        raise ValueError(f"Unknown timing event {self.event!r}")
+
+    def describe(self, profile: Profile, *, start: bool = False) -> str:
+        if self.event is not None:
+            return event_label(self.event, profile, start=start)
         if self.year is not None:
             return str(self.year)
         idx = min(self.person, len(profile.people) - 1)
@@ -100,6 +182,41 @@ class When:
         if isinstance(d, int):
             return cls(year=d)
         return cls(**d)
+
+
+def event_label(event: str, profile: Profile, *, start: bool = False) -> str:
+    """ "Alex dies", "After the first death", "End of plan"."""
+    kind, _, arg = event.partition(":")
+    if kind == "death":
+        name = profile.people[min(int(arg or 0), len(profile.people) - 1)].name
+        return f"After {name} dies" if start else f"{name} dies"
+    if kind == "first_death":
+        return "After the first death" if start else "First death"
+    if kind == "last_death":
+        return "End of plan"
+    return event
+
+
+def events_for(profile: Profile, *, start: bool = False) -> list[str]:
+    """The events a timing can use: each person's death, the first death
+    (couples only), and, for ends, the end of the plan."""
+    out = [f"death:{i}" for i in range(len(profile.people))]
+    if len(profile.people) > 1:
+        out.append("first_death")
+    if not start:
+        out.append("last_death")
+    return out
+
+
+@dataclass(frozen=True)
+class InheritedRule:
+    """How an inherited IRA must be emptied, worked out from who inherited it."""
+
+    stretch: bool  # yearly RMDs over a life expectancy, no 10-year limit (yet)
+    deadline: int | None  # last year: the account must be empty by its end
+    annual_rmds: bool  # yearly RMDs before the deadline
+    owner_life: bool = False  # RMDs over the original owner's remaining life (estate or trust)
+    text: str = ""
 
 
 @dataclass
@@ -122,7 +239,7 @@ class Account:
     inherited_year: int | None = None  # year the original owner died
     original_owner_birth_year: int | None = None
     owner_started_rmds: bool = True  # the owner died on or after their RMD start
-    eligible_designated_beneficiary: bool = False  # stretch over life expectancy, no 10-year limit
+    beneficiary: str = "other"  # who inherited it: a key of BENEFICIARY_KINDS
     enabled: bool = True  # False leaves the account (and rules on it) out, for what-ifs
 
     def label(self, profile: Profile) -> str:
@@ -141,12 +258,44 @@ class Account:
     def is_roth(self) -> bool:
         return self.kind in ROTH_KINDS
 
-    @property
-    def deadline_year(self) -> int | None:
-        """Last year of the 10-year rule, if it applies."""
-        if self.kind != "inherited_ira" or self.inherited_year is None or self.eligible_designated_beneficiary:
+    def inherited_rule(self, profile: Profile) -> InheritedRule | None:
+        """The withdrawal rule for an inherited IRA (None for other accounts).
+
+        * Estate or trust: the 5-year rule if the owner died before their
+          RMDs started, otherwise yearly RMDs over the owner's remaining
+          life expectancy.
+        * Deaths before 2020: lifetime withdrawals for any person.
+        * Deaths in 2020 or later: lifetime withdrawals for an eligible
+          designated beneficiary (spouse, disabled or chronically ill, not
+          more than 10 years younger); a minor child stretches until 21,
+          then has 10 years; anyone else has the 10-year rule, with yearly
+          RMDs if the owner had started them.
+        """
+        if self.kind != "inherited_ira" or self.inherited_year is None:
             return None
-        return self.inherited_year + 10
+        y = self.inherited_year
+        if self.beneficiary == "estate":
+            if self.owner_started_rmds:
+                return InheritedRule(True, None, True, owner_life=True,
+                                     text="Yearly withdrawals over the original owner's remaining life expectancy")
+            return InheritedRule(False, y + 5, False, text=f"5-year rule: empty by {y + 5}")
+        if y < 2020:
+            return InheritedRule(True, None, True, text="Lifetime withdrawals: inherited before 2020")
+        if self.beneficiary in EDB_KINDS:
+            return InheritedRule(True, None, True, text="Lifetime withdrawals (eligible designated beneficiary)")
+        if self.beneficiary == "minor_child" and self.owner is not None and self.owner < len(profile.people):
+            turns_21 = profile.people[self.owner].birth_year + 21
+            if turns_21 > y:
+                deadline = turns_21 + 10
+                return InheritedRule(True, deadline, True,
+                                     text=f"Lifetime withdrawals until age 21 ({turns_21}), then the 10-year "
+                                          f"rule: empty by {deadline}")
+        return InheritedRule(False, y + 10, self.owner_started_rmds, text=f"10-year rule: empty by {y + 10}")
+
+    def deadline_year(self, profile: Profile) -> int | None:
+        """Last year of the 10-year (or 5-year) rule, if one applies."""
+        rule = self.inherited_rule(profile)
+        return rule.deadline if rule else None
 
 
 @dataclass
@@ -159,7 +308,8 @@ class IncomeStream:
     name: str = ""
     start: When | None = None  # None = from the plan's first year
     end: When | None = None  # None = for life (or to the end of the plan); inclusive
-    growth: float = 0.0  # yearly increase after the first year (COLA, raises)
+    cola: str = "fixed"  # how the amount rises after the first year: a key of COLA_KINDS
+    growth: float = 0.0  # the yearly rate for a "fixed" COLA (raises, a pension's set COLA)
     survivor_pct: float = 0.0  # share that continues to the survivor (pensions)
     federal_taxable_pct: float = 1.0
     state_taxable_pct: float = 1.0  # not used yet: the state taxes what the federal return does
@@ -172,6 +322,10 @@ class IncomeStream:
         if self.owner is None or self.owner >= len(profile.people):
             return kind
         return f"{profile.people[self.owner].name} {kind.lower()}"
+
+    def rate(self, plan: "Plan") -> float:
+        """The yearly increase this stream gets."""
+        return {"none": 0.0, "inflation": plan.inflation, "ss_cola": plan.ss_cola}.get(self.cola, self.growth)
 
 
 @dataclass
@@ -189,18 +343,22 @@ class SocialSecurity:
 
 @dataclass
 class PersonPlan:
+    """A person's plan choices. Birth year and life expectancy are on the
+    baseline (the plan's own copy of it)."""
+
     social_security: SocialSecurity = field(default_factory=SocialSecurity)
-    death_age: int | None = None  # None = lives to the end of the plan
 
 
 @dataclass
 class Assumptions:
-    inflation: float | None = None  # None = the profile's inflation
+    # Inflation is the baseline's (one rate for the whole plan).
     ss_cola: float | None = None  # None = inflation
     return_rate: float = 0.05  # default for accounts with no return of their own
     cash_return: float = 0.03
     spending: float = 0.0  # yearly spending, today's dollars, grows with inflation
-    end_age: int = 95  # plan runs until everyone has died or reached this age
+    survivor_spending_pct: float = 1.0  # share of spending after the first death (couples)
+    # Account types that pay for spending when income falls short, in order.
+    spending_order: list[str] = field(default_factory=lambda: list(DEFAULT_SPENDING_ORDER))
     prior_magi: dict[str, float] = field(default_factory=dict)  # {"2025": 180000} for IRMAA
 
 
@@ -213,6 +371,8 @@ class Rule:
     mode: str = "fixed"
     amount: float = 0.0  # for "fixed"
     target: str = ""  # for "fill"
+    growth: str = "none"  # for "fixed": how the amount changes, a key of RULE_GROWTH_KINDS
+    growth_rate: float = 0.0  # for growth "fixed"
     to_account: str | None = None  # Roth account for conversions (default: owner's Roth IRA)
     enabled: bool = True
     note: str = ""
@@ -221,14 +381,24 @@ class Rule:
         """First and last year the rule applies. Nothing in a plan starts
         before the plan's first year (the profile's year), so an earlier
         start counts from then."""
-        first = self.start.resolve(profile)
+        first = self.start.resolve(profile, start=True)
         last = self.end.resolve(profile) if self.end else first
         return max(first, profile.year), last
+
+    def fixed_amount(self, plan: "Plan", year: int) -> float:
+        """The "fixed" amount for ``year``: flat, grown with inflation from
+        today's dollars, or grown by the rule's own rate after its first year."""
+        if self.growth == "inflation":
+            return self.amount * (1 + plan.inflation) ** (year - plan.start_year)
+        if self.growth == "fixed":
+            first, _ = self.years(plan.profile)
+            return self.amount * (1 + self.growth_rate) ** max(0, year - first)
+        return self.amount
 
     def describe(self, profile: Profile, accounts: dict[str, Account]) -> str:
         acct = accounts.get(self.account)
         name = acct.label(profile) if acct else self.account
-        when = self.start.describe(profile)
+        when = self.start.describe(profile, start=True)
         if self.end:
             when += f" to {self.end.describe(profile)}"
         how = {
@@ -261,25 +431,22 @@ class Plan:
 
     @property
     def inflation(self) -> float:
-        a = self.assumptions.inflation
-        return self.profile.inflation if a is None else a
+        """The plan's one inflation rate, from its baseline."""
+        return self.profile.inflation
 
     @property
     def ss_cola(self) -> float:
         c = self.assumptions.ss_cola
         return self.inflation if c is None else c
 
-    def death_year(self, i: int) -> int | None:
-        age = self.people[i].death_age
-        return None if age is None else self.profile.people[i].birth_year + age
+    def death_year(self, i: int) -> int:
+        """The last year person ``i`` is alive (from the baseline's life expectancy)."""
+        return death_year(self.profile, i)
 
     @property
     def end_year(self) -> int:
-        last = self.start_year
-        for i, p in enumerate(self.profile.people):
-            dy = self.death_year(i)
-            last = max(last, dy if dy is not None else p.birth_year + self.assumptions.end_age)
-        return last
+        """The plan ends when the last person dies."""
+        return max([self.start_year] + [self.death_year(i) for i in range(len(self.profile.people))])
 
     @property
     def title(self) -> str:
@@ -322,7 +489,7 @@ class Plan:
         items = [(r.describe(prof, {a.id: a for a in self.accounts}), r.start, r.end) for r in self.rules]
         items += [(s.label(prof), s.start, s.end) for s in self.incomes]
         for name, start, end in items:
-            first = start.resolve(prof) if start else y0
+            first = start.resolve(prof, start=True) if start else y0
             if first < y0:
                 notes.append(f"{name}: starts in {first}, before the plan's first year; counted from {y0}")
             if end is not None and end.resolve(prof) < max(first, y0):
@@ -339,9 +506,20 @@ class Plan:
                 problems.append(f"Account {a.id}: unknown kind {a.kind!r}")
             if a.kind == "inherited_ira" and a.inherited_year is None:
                 problems.append(f"Account {a.id}: an inherited IRA needs the year it was inherited")
+            if a.beneficiary not in BENEFICIARY_KINDS:
+                problems.append(f"Account {a.id}: unknown beneficiary {a.beneficiary!r}")
         for s in self.incomes:
             if s.kind not in INCOME_KINDS:
                 problems.append(f"Income {s.name or s.kind}: unknown kind {s.kind!r}")
+            if s.cola not in COLA_KINDS:
+                problems.append(f"Income {s.name or s.kind}: unknown COLA {s.cola!r}")
+        for k in self.assumptions.spending_order:
+            if k not in SPENDING_SOURCES:
+                problems.append(f"Spending order: unknown account type {k!r}")
+        for w in [r.start for r in self.rules] + [r.end for r in self.rules] + \
+                [s.start for s in self.incomes] + [s.end for s in self.incomes]:
+            if w is not None and w.event is not None and w.event not in WHEN_EVENTS:
+                problems.append(f"Unknown timing event {w.event!r}")
         for r in self.rules:
             if r.kind not in RULE_KINDS:
                 problems.append(f"Rule: unknown kind {r.kind!r}")
@@ -351,6 +529,8 @@ class Plan:
                 problems.append(f"Rule: no account with id {r.account!r}")
             if r.mode == "fill" and not r.target:
                 problems.append("Rule: a fill rule needs a target such as " + FILL_TARGET_HELP)
+            if r.growth not in RULE_GROWTH_KINDS:
+                problems.append(f"Rule: unknown amount growth {r.growth!r}")
         return problems
 
     # -- persistence --------------------------------------------------
@@ -359,7 +539,7 @@ class Plan:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Plan":
-        data = dict(data)
+        data = _migrate(data)
         profile = Profile.from_dict(data.pop("profile"))
         people = []
         for p in data.get("people", []):
@@ -384,7 +564,9 @@ class Plan:
                    incomes=incomes, rules=rules, assumptions=assumptions)
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
+        data = self.to_dict()
+        data["schema_version"] = PLAN_SCHEMA_VERSION
+        Path(path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     @classmethod
     def load(cls, path: str | Path) -> "Plan":
@@ -408,13 +590,53 @@ class Plan:
                                     current_benefit=p.social_security)
             people.append(PersonPlan(social_security=ss))
             if p.wages:
-                incomes.append(IncomeStream(kind="wages", amount=p.wages, owner=i, growth=profile.inflation))
+                incomes.append(IncomeStream(kind="wages", amount=p.wages, owner=i, cola="inflation"))
             if p.pension:
-                incomes.append(IncomeStream(kind="pension", amount=p.pension, owner=i))
+                incomes.append(IncomeStream(kind="pension", amount=p.pension, owner=i, cola="none"))
         h = profile.household
         for kind, amount in (("interest", h.taxable_interest), ("qualified_dividends", h.qualified_dividends),
                              ("tax_exempt", h.tax_exempt_interest), ("other_ordinary", h.other_ordinary_income)):
             if amount:
-                incomes.append(IncomeStream(kind=kind, amount=amount, owner=None))
+                incomes.append(IncomeStream(kind=kind, amount=amount, owner=None, cola="none"))
         return cls(profile=profile, people=people, incomes=incomes,
                    assumptions=Assumptions())
+
+
+def _migrate(data: dict) -> dict:
+    """Bring an older plan file's dictionary up to the current schema.
+
+    Version 1 (to 0.2.x) to 2:
+
+    * ``people[i].death_age`` and ``assumptions.end_age`` become each
+      person's ``life_expectancy`` on the plan's baseline (a person with no
+      death age lived to the end age, so that is their life expectancy).
+    * ``assumptions.inflation`` (a plan-level override) becomes the
+      baseline's inflation.
+    * Income ``growth`` becomes a "Fixed %" COLA (or "None" when it was 0).
+    * ``eligible_designated_beneficiary`` becomes the beneficiary choice.
+    * ``spending_order`` starts as cash, then brokerage, as before.
+    """
+    data = copy.deepcopy(data)
+    version = int(data.get("schema_version", 1))
+    if version < 2:
+        profile = data.setdefault("profile", {})
+        assumptions = data.setdefault("assumptions", {})
+        end_age = assumptions.pop("end_age", 95)
+        inflation = assumptions.pop("inflation", None)
+        if inflation is not None:
+            profile["inflation"] = inflation
+        people = data.get("people", [])
+        for i, person in enumerate(profile.get("people", [])):
+            death = people[i].get("death_age") if i < len(people) else None
+            person.setdefault("life_expectancy", int(death if death is not None else end_age))
+        for p in people:
+            p.pop("death_age", None)
+        for s in data.get("incomes", []):
+            if "cola" not in s:
+                s["cola"] = "fixed" if s.get("growth") else "none"
+        for a in data.get("accounts", []):
+            edb = a.pop("eligible_designated_beneficiary", False)
+            a.setdefault("beneficiary", "close_in_age" if edb else "other")
+        assumptions.setdefault("spending_order", list(DEFAULT_SPENDING_ORDER))
+    data["schema_version"] = PLAN_SCHEMA_VERSION
+    return data
