@@ -4,6 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also test on macOS (uses 10x the Actions minutes)"
+        type: boolean
+        default: false
+
+# A new push to a pull request cancels its older, unfinished runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -12,6 +23,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.13"]
+        # macOS runs only when the repository variable MACOS_BUILDS is
+        # true, or when "Run workflow" is started with macOS ticked
+        # (see docs/packaging.md).
+        exclude:
+          - os: ${{ (vars.MACOS_BUILDS == 'true' || inputs.macos) && 'none' || 'macos-latest' }}
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen

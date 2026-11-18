@@ -76,8 +76,8 @@ change only docs, tests or examples need no bump.
 
 ## Builds on GitHub
 
-The **build apps** workflow builds all three apps, checks that each one
-starts and carries the right version, and zips them as
+The **build apps** workflow builds the apps (macOS only when switched on, see
+below), checks that each one starts and carries the right version, and zips them as
 `RetirementTaxPlannerLite-<version>-<OS>.zip`. It runs:
 
 * **On every push to `main`** (so after each merged pull request). The zips
@@ -91,6 +91,27 @@ starts and carries the right version, and zips them as
   every merged app change becomes a release.
 * On pull requests that change packaging or app code, and by hand
   (Actions tab, "build apps", "Run workflow"): builds only, no release.
+
+### macOS builds are off for now
+
+While the repository is private, GitHub counts each macOS minute as ten
+against the monthly Actions allowance, so the Mac build and the Mac tests
+are switched off. Releases then carry the Windows and Linux downloads only.
+
+* **One Mac build:** Actions tab, *build apps*, *Run workflow*, tick
+  "Also build for macOS", *Run workflow*. The zip is on that run's page.
+* **Mac builds every time again:** Settings, *Secrets and variables*,
+  *Actions*, *Variables* tab, *New repository variable*: name
+  `MACOS_BUILDS`, value `true`. Delete it or set it to `false` to switch
+  them off again. It turns on both the Mac build and the Mac tests.
+
+Public repositories get standard runners, macOS included, without using
+the allowance, so once the repository is public you can set
+`MACOS_BUILDS` to `true` and leave it.
+
+Other savings: draft pull requests skip the app builds (they run once
+the pull request is marked ready), and a new push to a pull request
+cancels its unfinished runs.
 
 You can also push a tag `v<version>` yourself, or make a release by hand on
 GitHub; the tag must match `__version__`, and the workflow attaches the zips.
