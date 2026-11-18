@@ -5,6 +5,8 @@ matplotlib Figure, so the app and the command line share them.
 
 from __future__ import annotations
 
+import math
+
 from matplotlib.colors import to_hex, to_rgb
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
@@ -180,15 +182,21 @@ def render_income(
     peak_bar = max(bottom.values(), default=0.0)
     shown_lines = [k for k in result.line_labels if visibility.get(k, False)]
     end_labels: list[tuple[float, str]] = []
+    gaps = False
     for key in shown_lines:
         ys = [yr.lines.get(key) for yr in result.years]
+        # A year with no value is over that threshold whatever else changes:
+        # leave a gap there rather than drawing a meaningless value.
+        if any(v is None for v in ys) and any(key in yr.lines for yr in result.years):
+            gaps = True
         if all(v is None for v in ys):
             continue
-        vals = [(v or 0.0) * scale[y] for v, y in zip(ys, years)]
+        vals = [math.nan if v is None else v * scale[y] for v, y in zip(ys, years)]
         style = line_style(key, palette, bracket_keys)
         (ln,) = ax.plot(years, vals, drawstyle="steps-mid", label=result.line_labels[key], **style)
         line_handles.append(ln)
-        end_labels.append((vals[-1], line_short_label(key)))
+        if not math.isnan(vals[-1]):
+            end_labels.append((vals[-1], line_short_label(key)))
 
     # Y range: fit the bars, plus lines that are not far above them.
     line_top = 0.0
@@ -222,6 +230,9 @@ def render_income(
                      "tiers for that premium year (projected where needed).")
     notes.append("Lines show the total income at which that year's return reaches each threshold, "
                  "allowing for Social Security taxation and deductions.")
+    if gaps:
+        notes.append("A gap in a line: income that can't be reduced (Social Security, RMDs, dividends) "
+                     "is already over that threshold in those years.")
     short = [yr.year for yr in result.years if yr.shortfall > 0]
     if short:
         notes.append(f"Spending not covered in {short[0]}–{short[-1]}: add a withdrawal rule.")

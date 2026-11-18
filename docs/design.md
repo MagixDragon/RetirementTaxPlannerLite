@@ -248,8 +248,8 @@ final balances.
 | Income stream | wages, pension, foreign pension, annuity, interest, qualified dividends, long-term gain, other ordinary, tax-exempt; owner, yearly amount in the first year paid, start and end (age or year; one year for a one-off), growth (COLA or raises; pensions default to 0%), survivor %, federal taxable % |
 | Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI, with an optional early end age (a claiming age past FRA suspends SSDI's retirement benefit until then) |
 | Person | death age (optional) |
-| Assumptions | inflation, Social Security COLA, default return, cash return, yearly spending (today's dollars), plan end age, MAGI for the two years before the plan (for IRMAA) |
-| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N), or the whole balance |
+| Assumptions | inflation, Social Security COLA, default return and cash return (nominal, before inflation; every cash account earns the cash return), yearly spending (today's dollars), plan end age, MAGI for the two years before the plan (for IRMAA) |
+| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance |
 
 **Overrides.** For each account and kind of rule, the rule with the
 narrowest span wins in a year (ties go to the later rule). So "fill to 22%,
@@ -324,6 +324,10 @@ line is where the income really reaches it. Bracket tops are read against
 the top of the ordinary segments, because gains stack above ordinary
 income on the return; the other lines are read against the whole taxable
 bar. IRMAA lines use the tiers for the premium year two years later.
+When the income that can't be removed (Social Security, RMDs, dividends,
+gains) is already over a threshold, that year has no value for the line and
+the chart leaves a gap, with a note saying why, rather than drawing the
+removable-income limit (which would stack several lines on one value).
 
 Suggested lines: the brackets the bars reach plus the next one up (not
 10%), the 0% gains band if there are gains, IRMAA tiers the bars come

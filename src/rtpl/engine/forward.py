@@ -20,7 +20,9 @@ Each year:
 Threshold lines for the chart (bracket tops, IRMAA tiers, ACA) are given in
 the same units as the bars: the total income at which that year's return
 would reach the threshold, found by adding or removing ordinary income and
-recomputing the return.
+recomputing the return. A year where the income that can't be removed
+(Social Security, RMDs, dividends, gains) is already over a threshold has
+no value for that line (None), and the chart leaves a gap there.
 """
 
 from __future__ import annotations
@@ -100,7 +102,7 @@ class YearResult:
     balances_end: dict[str, float]
     spending: float
     shortfall: float
-    lines: dict[str, float] = field(default_factory=dict)
+    lines: dict[str, float | None] = field(default_factory=dict)  # None: over it in every case
     notes: list[str] = field(default_factory=list)
 
     def category_totals(self) -> dict[str, float]:
@@ -403,11 +405,14 @@ class PlanEngine:
         raise ValueError(f"Unknown fill target {target!r}")
 
     def solve_extra_ordinary(self, prof: Profile, law: FederalLaw, metric, limit: float,
-                             lo: float, hi: float, tol: float = 1.0) -> float:
-        """Largest extra ordinary income in [lo, hi] with metric <= limit."""
+                             lo: float, hi: float, tol: float = 1.0, *, unreachable=None) -> float:
+        """Largest extra ordinary income in [lo, hi] with metric <= limit.
+
+        If even ``lo`` is over the limit, returns ``unreachable`` when given, else ``lo``.
+        """
         f = lambda x: metric(compute_tax(prof, law, self.state_law, extra=x, source=IncomeSource.ORDINARY))  # noqa: E731
         if f(lo) > limit:
-            return lo
+            return lo if unreachable is None else unreachable
         if f(hi) <= limit:
             return hi
         for _ in range(60):
@@ -628,7 +633,10 @@ class PlanEngine:
                 if a.id in reinvested and a.id in basis:
                     basis[a.id] += reinvested[a.id]
             for target_id, amount in _conversion_totals(conversions).items():
-                bal[target_id] = bal.get(target_id, 0.0) + amount * (1 + plan.assumptions.return_rate)
+                dest = by_id.get(target_id)
+                rate = dest.return_rate if dest is not None and dest.return_rate is not None \
+                    else plan.assumptions.return_rate
+                bal[target_id] = bal.get(target_id, 0.0) + amount * (1 + rate)
             if surplus > 0:
                 dest = next((a for a in accounts if a.kind == "taxable"), None) or next(
                     a for a in accounts if a.kind == "cash")
@@ -682,6 +690,8 @@ class PlanEngine:
         if r.mode == "fixed":
             amount = r.amount - already
         elif r.mode == "spread":
+            if acct.deadline_year is not None:
+                last = min(last, acct.deadline_year)  # the 10-year rule empties it then anyway
             amount = bal[acct.id] / max(1, last - year + 1) - already
         elif r.mode == "all":
             amount = available
@@ -777,14 +787,15 @@ class PlanEngine:
         return cost * 12 * len(enrolled), note
 
     # -- threshold lines ---------------------------------------------------
-    def threshold_lines(self, yr: YearResult, prof: Profile, law: FederalLaw, labels: dict[str, str]) -> dict[str, float]:
+    def threshold_lines(self, yr: YearResult, prof: Profile, law: FederalLaw,
+                        labels: dict[str, str]) -> dict[str, float | None]:
         fs = status_key(prof.filing_status)
         base = yr.taxable_bar
         ordinary_now = sum(
             s.amount for s in yr.sources if s.category not in TAX_FREE and s.category not in PREFERENTIAL and s.category != "ss"
         )
         lo, hi = -ordinary_now - 1.0, 5_000_000.0
-        out: dict[str, float] = {}
+        out: dict[str, float | None] = {}
 
         totals = yr.category_totals()
         gains = sum(totals[c] for c in PREFERENTIAL)
@@ -793,8 +804,11 @@ class PlanEngine:
             # Ordinary bracket tops are read against the top of the ordinary
             # segments (gains sit above them, as they do on the return);
             # everything else is read against the whole taxable bar.
-            delta = self.solve_extra_ordinary(prof, law, metric, limit, lo, hi, tol=5.0)
-            out[key] = max(0.0, base - (gains if ordinary_only else 0.0) + delta)
+            # When the income that can't be removed is already over the
+            # threshold there is no line to draw: the solver would only
+            # return its lower limit, which is that income, not the threshold.
+            delta = self.solve_extra_ordinary(prof, law, metric, limit, lo, hi, tol=5.0, unreachable=math.nan)
+            out[key] = None if math.isnan(delta) else max(0.0, base - (gains if ordinary_only else 0.0) + delta)
             labels.setdefault(key, label)
 
         line("deduction", "Deductions (taxable income starts)", lambda r: r.taxable_income, 0.0)
@@ -845,7 +859,9 @@ def default_line_visibility(result: PlanResult) -> dict[str, bool]:
     marketplace coverage. Every line can be turned on or off."""
 
     def near(key: str, slack: float = 1.15) -> bool:
-        return any(yr.lines.get(key, math.inf) <= max(yr.total_income, 1.0) * slack for yr in result.years)
+        # A year with no value (None) is over the threshold in every case.
+        return any(yr.lines.get(key, math.inf) is None
+                   or yr.lines.get(key, math.inf) <= max(yr.total_income, 1.0) * slack for yr in result.years)
 
     vis: dict[str, bool] = {}
     keys = list(result.line_labels)

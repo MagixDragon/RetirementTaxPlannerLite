@@ -199,17 +199,73 @@ def test_assumptions_and_person_forms(window):
     pick(ed, plan.assumptions)
     form = ed.forms["assumptions"]
     form.spending.setValue(90000)
-    form.inflation.setValue(3.0)
+    assert form.inflation.is_default() and not form.inflation.field.isEnabled()
+    assert form.inflation.field.value() == pytest.approx(100 * plan.profile.inflation)
+    form.inflation.check.setChecked(False)
+    form.inflation.field.setValue(3.0)
     assert plan.assumptions.spending == 90000 and plan.assumptions.inflation == pytest.approx(0.03)
-    form.inflation.setValue(form.inflation.minimum())
+    assert form.cola.is_default() and form.cola.field.value() == pytest.approx(3.0)  # shows inflation
+    form.inflation.check.setChecked(True)
     assert plan.assumptions.inflation is None
+    assert form.form.labelForField(form.magi1).text() == f"IRMAA MAGI for {plan.start_year - 2}"
+    form.magi1.setValue(0)
+    assert form.magi1.text() == "Not entered" and str(plan.start_year - 2) not in plan.assumptions.prior_magi
     pick(ed, plan.people[1])
     pf = ed.forms["people"]
     assert pf.claim.value() == 62
-    pf.claim.setValue(67)
-    pf.death.setValue(90)
-    assert plan.people[1].social_security.claim_age == 67 and plan.people[1].death_age == 90
-    assert "claims at 67" in find_item(ed, plan.people[1]).text(0)
+    pf.claim.years.setValue(67)
+    pf.claim.months.setValue(5)
+    assert plan.people[1].social_security.claim_age == pytest.approx(67 + 5 / 12)
+    assert "claims at 67 and 5 months" in find_item(ed, plan.people[1]).text(0)
+    pf.claim.years.setValue(70)
+    assert pf.claim.months.maximum() == 0 and plan.people[1].social_security.claim_age == 70
+    assert not pf.death.is_default() and pf.death.field.value() == plan.people[1].death_age
+    pf.death.field.setValue(90)
+    assert plan.people[1].death_age == 90
+    pf.death.check.setChecked(True)
+    assert plan.people[1].death_age is None and not pf.death.field.isEnabled()
+    assert pf.death.field.value() == plan.assumptions.end_age  # shows what "end of plan" means
+    pf.ssdi.setChecked(True)
+    assert pf.ssdi_end.is_default() and plan.people[1].social_security.ssdi_end_age is None
+    pf.ssdi_end.check.setChecked(False)
+    pf.ssdi_end.field.setValue(60.5)
+    assert plan.people[1].social_security.ssdi_end_age == pytest.approx(60.5)
+
+
+def test_account_form_cash_basis_and_inherited_deadline(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    form = ed.forms["accounts"]
+    taxable = next(a for a in plan.accounts if a.kind == "taxable")
+    pick(ed, taxable)
+    assert form.interest.decimals() == 4
+    form.interest.setValue(0.0175)
+    assert form.interest.text() == "0.0175%"
+    form.interest.setValue(1.5)
+    assert form.interest.text() == "1.50%"
+    form.interest.setValue(0.0175)
+    assert taxable.interest_yield == pytest.approx(0.000175)
+    form.basis.check.setChecked(False)
+    form.basis.field.setValue(123_000)
+    assert taxable.cost_basis == 123_000
+    form.basis.check.setChecked(True)
+    assert taxable.cost_basis is None and form.basis.field.value() == taxable.balance
+    # A cash account hides the return and yield it would ignore.
+    form.kind.setCurrentIndex(form.kind.findData("cash"))
+    assert not form.form.isRowVisible(form.return_rate) and not form.form.isRowVisible(form.interest)
+    assert form.form.isRowVisible(form.cash_note) and "Cash return" in form.cash_note.text()
+    inherited = next(a for a in plan.accounts if a.kind == "inherited_ira")
+    pick(ed, inherited)
+    assert f"empty by {inherited.deadline_year}" in form.deadline.text()
+    # A rule on it can't end after the deadline.
+    rule = next(r for r in plan.rules if r.account == inherited.id)
+    pick(ed, rule)
+    rf = ed.forms["rules"]
+    assert rf.form.isRowVisible(rf.deadline)
+    rf.end.mode.setCurrentIndex(rf.end.mode.findData("year"))
+    rf.end.spin.setValue(inherited.deadline_year + 5)
+    assert rf.end.spin.maximum() == inherited.deadline_year
+    assert rule.end.resolve(plan.profile) == inherited.deadline_year
 
 
 def test_new_plan_from_profile_can_be_built_in_the_app(window):

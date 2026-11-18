@@ -259,3 +259,56 @@ def test_ssdi_default_continues_and_early_end(lib):
     ss = {y.ages[0]: y.category_totals()["ss"] for y in run_plan(plan, lib, with_lines=False).years}
     assert ss[60] == pytest.approx(30_000) and ss[61] == 0
     assert ss[62] == pytest.approx(21_000)  # ordinary early claim afterwards
+
+
+def test_threshold_line_missing_when_income_cannot_get_under_it(lib):
+    # Dividends alone are over the 0% gains band and IRMAA tier 1: those
+    # lines have no value (a gap), not the dividends' own amount.
+    prof = single(birth=1951)
+    plan = Plan(profile=prof, incomes=[IncomeStream(kind="qualified_dividends", amount=400_000, owner=0)],
+                assumptions=Assumptions(end_age=76))
+    res = run_plan(plan, lib)
+    y = res.years[0]
+    assert y.lines["cg0"] is None and y.lines["irmaa:1"] is None
+    assert y.lines["bracket:0.22"] is not None  # ordinary income can still be added up to it
+    assert default_line_visibility(res)["irmaa:1"]  # over it, so it is suggested
+    # The chart draws the gap and says why.
+    from matplotlib.figure import Figure
+
+    from rtpl.charts.forward_chart import render_income
+    from rtpl.theme import Theme
+
+    fig = Figure()
+    render_income(fig, res, {"cg0": True, "irmaa:1": True, "bracket:0.22": True}, Theme.load("default").palette("light"))
+    assert any("A gap in a line" in t.get_text() for t in fig.texts)
+
+
+def test_spread_rule_on_inherited_ira_stops_at_the_deadline(lib):
+    prof = single(birth=1980)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="inh", kind="inherited_ira", owner=0, balance=100_000, inherited_year=2024,
+                          original_owner_birth_year=1940, owner_started_rmds=False, return_rate=0.0)],
+        rules=[Rule(kind="withdrawal", account="inh", start=When(year=2026), end=When(year=2040), mode="spread")],
+        assumptions=Assumptions(end_age=62),
+    )
+    res = run_plan(plan, lib, with_lines=False)
+    taken = {y.year: y.category_totals()["inherited"] for y in res.years}
+    # Nine years to the 2034 deadline, not 15 years to the rule's end.
+    assert taken[2026] == pytest.approx(100_000 / 9, rel=1e-6)
+    assert taken[2034] == pytest.approx(taken[2026], rel=1e-6)
+    assert taken.get(2035, 0) == 0
+
+
+def test_conversion_grows_at_the_roth_accounts_own_return(lib):
+    prof = single(birth=1960)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="ira", kind="traditional_ira", owner=0, balance=500_000, return_rate=0.0),
+                  Account(id="roth", kind="roth_ira", owner=0, balance=0.0, return_rate=0.10)],
+        rules=[Rule(kind="roth_conversion", account="ira", start=When(year=2026), mode="fixed", amount=50_000,
+                    to_account="roth")],
+        assumptions=Assumptions(end_age=67, return_rate=0.02),
+    )
+    res = run_plan(plan, lib, with_lines=False)
+    assert res.years[0].balances_end["roth"] == pytest.approx(55_000)
