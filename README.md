@@ -22,8 +22,12 @@ from 63 to 70".
 
 ![Forward-looking graph for an example plan](docs/images/forward-example.png)
 
-> This is a planning aid, not tax advice. Check the numbers in the tax-law
-> files against official sources before relying on them.
+> **Disclaimer.** This is a planning aid, not tax, legal, investment or
+> financial advice. Tax law is simplified (see [docs/design.md](docs/design.md))
+> and the tax-law files can contain mistakes or be out of date. Check the
+> numbers against official sources, and talk to a qualified professional
+> before you act on them. The software comes with no warranty; see
+> [License](#license).
 
 ## Run it
 
@@ -116,3 +120,17 @@ Washington's capital gains tax). Each state file lists what it leaves out
 under `notes`; hover over the state checkbox in the app to read them.
 
 See [docs/design.md](docs/design.md) for how everything works.
+
+## License
+
+RetirementTaxPlannerLite is free software: you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. It is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE)
+for the full text.
+
+The stand-alone builds bundle third-party libraries under their own
+licenses, including Qt and PySide6 (LGPL-3.0) and matplotlib (PSF-based
+matplotlib license).
