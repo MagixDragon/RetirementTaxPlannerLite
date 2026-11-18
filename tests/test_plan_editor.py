@@ -255,6 +255,10 @@ def test_baseline_tab_gets_its_full_height(window):
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
     window.resize(1200, 700)
     window.show()
+    # Saved panel settings can leak between tests on Windows and macOS
+    # (QSettings ignores XDG_CONFIG_HOME there), so open the panel explicitly.
+    window.panels.set_pinned(window.inputs_panel, True)
+    window.panels.set_open(window.inputs_panel, True)
     QtWidgets.QApplication.processEvents()
     for page in (window.form, window.plan_editor, window.form):
         window.input_tabs.setCurrentWidget(page)
