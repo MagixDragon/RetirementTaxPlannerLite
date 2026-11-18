@@ -261,26 +261,50 @@ def test_ssdi_default_continues_and_early_end(lib):
     assert ss[62] == pytest.approx(21_000)  # ordinary early claim afterwards
 
 
-def test_threshold_line_missing_when_income_cannot_get_under_it(lib):
-    # Dividends alone are over the 0% gains band and IRMAA tier 1: those
-    # lines have no value (a gap), not the dividends' own amount.
+def test_threshold_lines_sit_at_the_threshold_when_income_cannot_get_under_it(lib):
+    # Dividends alone are over the 0% gains band and the IRMAA tiers. The
+    # lines still run every year, at the threshold (inside the bar), each on
+    # its own value, not all stacked on the dividends.
     prof = single(birth=1951)
     plan = Plan(profile=prof, incomes=[IncomeStream(kind="qualified_dividends", amount=400_000, owner=0)],
                 assumptions=Assumptions(end_age=76))
     res = run_plan(plan, lib)
     y = res.years[0]
-    assert y.lines["cg0"] is None and y.lines["irmaa:1"] is None
-    assert y.lines["bracket:0.22"] is not None  # ordinary income can still be added up to it
-    assert default_line_visibility(res)["irmaa:1"]  # over it, so it is suggested
-    # The chart draws the gap and says why.
+    std = y.tax.agi - y.tax.taxable_income
+    cg_top = y.law.capital_gains["single"].thresholds()[0]
+    assert y.lines["cg0"] == pytest.approx(cg_top + std, abs=10.0)
+    tiers = [y.lines[f"irmaa:{n}"] for n in (1, 2, 3)]
+    assert tiers[0] < tiers[1] < tiers[2] < y.total_income
+    assert all(v is not None for yr in res.years for v in yr.lines.values())
+    # The chart labels every shown line at the right.
     from matplotlib.figure import Figure
 
     from rtpl.charts.forward_chart import render_income
     from rtpl.theme import Theme
 
     fig = Figure()
-    render_income(fig, res, {"cg0": True, "irmaa:1": True, "bracket:0.22": True}, Theme.load("default").palette("light"))
-    assert any("A gap in a line" in t.get_text() for t in fig.texts)
+    render_income(fig, res, {"cg0": True, "irmaa:1": True, "irmaa:2": True}, Theme.load("default").palette("light"))
+    texts = [t.get_text() for t in fig.axes[0].texts]
+    assert "0% CG" in texts and "IRMAA 1" in texts and "IRMAA 2" in texts
+
+
+def test_nothing_starts_before_the_plan(lib):
+    prof = single(birth=1960)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="ira", kind="traditional_ira", owner=0, balance=500_000)],
+        incomes=[IncomeStream(kind="pension", amount=10_000, owner=0, start=When(year=2015), name="Old pension")],
+        rules=[Rule(kind="withdrawal", account="ira", start=When(year=2015), end=When(year=2027), mode="spread"),
+               Rule(kind="withdrawal", account="ira", start=When(year=2030), end=When(year=2029), mode="fixed",
+                    amount=5_000)],
+        assumptions=Assumptions(end_age=70),
+    )
+    assert plan.rules[0].years(prof) == (2026, 2027)
+    res = run_plan(plan, lib, with_lines=False)
+    assert res.years[0].category_totals()["ira_withdrawal"] == pytest.approx(500_000 / 2 * 1, rel=0.02)
+    assert res.years[0].category_totals()["pension"] == pytest.approx(10_000)
+    notes = " ".join(res.notes)
+    assert "Old pension: starts in 2015" in notes and "ends before it starts" in notes
 
 
 def test_spread_rule_on_inherited_ira_stops_at_the_deadline(lib):

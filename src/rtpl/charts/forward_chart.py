@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 
+from matplotlib import patheffects
+
 from matplotlib.colors import to_hex, to_rgb
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
@@ -90,7 +92,7 @@ def _style(ax, palette: Palette) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(_money))
 
 
-def line_style(key: str, palette: Palette, bracket_keys: list[str]) -> dict:
+def line_style(key: str, palette: Palette, bracket_keys: list[str], irmaa_keys: list[str] | None = None) -> dict:
     lc = palette.lines
     if key.startswith("bracket:"):
         k = bracket_keys.index(key)
@@ -98,12 +100,21 @@ def line_style(key: str, palette: Palette, bracket_keys: list[str]) -> dict:
         return dict(color=_mix(lc.get("bracket_low", palette.text_secondary),
                                lc.get("bracket_high", palette.text_primary), t),
                     linestyle="-", linewidth=1.5)
+    # Tight dots with a thin outline in the background colour, so they stay
+    # visible where they cross bars of a similar colour.
+    dots = dict(linestyle=(0, (0.1, 1.6)), linewidth=2.2, dash_capstyle="round",
+                path_effects=[patheffects.Stroke(linewidth=3.6, foreground=palette.surface, alpha=0.8),
+                              patheffects.Normal()])
     if key.startswith("irmaa:"):
-        return dict(color=lc.get("irmaa", palette.irmaa), linestyle=(0, (5, 3)), linewidth=1.2)
+        # Tight dots in shades of one colour, light for tier 1 to full for the
+        # top tier, so tiers that bunch together (single filer) stay in order.
+        keys = irmaa_keys or [key]
+        t = keys.index(key) / max(1, len(keys) - 1) if key in keys else 1.0
+        return dict(color=_mix(lc.get("irmaa", palette.irmaa), palette.surface, 0.45 * (1 - t)), **dots)
     if key.startswith("aca"):
-        return dict(color=lc.get("aca", palette.aca), linestyle=(0, (1, 2)), linewidth=1.6)
+        return dict(color=lc.get("aca", palette.aca), linestyle=(0, (6, 2, 1, 2)), linewidth=1.3)
     if key == "cg0":
-        return dict(color=lc.get("cg0", palette.text_secondary), linestyle=(0, (6, 2, 1, 2)), linewidth=1.3)
+        return dict(color=lc.get("cg0", palette.text_secondary), **dots)
     return dict(color=lc.get("deduction", palette.text_secondary), linestyle="-", linewidth=1.0)
 
 
@@ -182,21 +193,18 @@ def render_income(
     peak_bar = max(bottom.values(), default=0.0)
     shown_lines = [k for k in result.line_labels if visibility.get(k, False)]
     end_labels: list[tuple[float, str]] = []
-    gaps = False
+    irmaa_keys = [k for k in result.line_labels if k.startswith("irmaa:")]
     for key in shown_lines:
         ys = [yr.lines.get(key) for yr in result.years]
-        # A year with no value is over that threshold whatever else changes:
-        # leave a gap there rather than drawing a meaningless value.
-        if any(v is None for v in ys) and any(key in yr.lines for yr in result.years):
-            gaps = True
         if all(v is None for v in ys):
             continue
         vals = [math.nan if v is None else v * scale[y] for v, y in zip(ys, years)]
-        style = line_style(key, palette, bracket_keys)
+        style = line_style(key, palette, bracket_keys, irmaa_keys)
         (ln,) = ax.plot(years, vals, drawstyle="steps-mid", label=result.line_labels[key], **style)
         line_handles.append(ln)
-        if not math.isnan(vals[-1]):
-            end_labels.append((vals[-1], line_short_label(key)))
+        last = next((v for v in reversed(vals) if not math.isnan(v)), None)
+        if last is not None:
+            end_labels.append((last, line_short_label(key)))
 
     # Y range: fit the bars, plus lines that are not far above them.
     line_top = 0.0
@@ -230,9 +238,6 @@ def render_income(
                      "tiers for that premium year (projected where needed).")
     notes.append("Lines show the total income at which that year's return reaches each threshold, "
                  "allowing for Social Security taxation and deductions.")
-    if gaps:
-        notes.append("A gap in a line: income that can't be reduced (Social Security, RMDs, dividends) "
-                     "is already over that threshold in those years.")
     short = [yr.year for yr in result.years if yr.shortfall > 0]
     if short:
         notes.append(f"Spending not covered in {short[0]}–{short[-1]}: add a withdrawal rule.")

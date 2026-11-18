@@ -218,9 +218,12 @@ class Rule:
     note: str = ""
 
     def years(self, profile: Profile) -> tuple[int, int]:
+        """First and last year the rule applies. Nothing in a plan starts
+        before the plan's first year (the profile's year), so an earlier
+        start counts from then."""
         first = self.start.resolve(profile)
         last = self.end.resolve(profile) if self.end else first
-        return first, last
+        return max(first, profile.year), last
 
     def describe(self, profile: Profile, accounts: dict[str, Account]) -> str:
         acct = accounts.get(self.account)
@@ -309,6 +312,22 @@ class Plan:
 
     def account(self, acct_id: str) -> Account | None:
         return next((a for a in self.accounts if a.id == acct_id), None)
+
+    def timing_notes(self) -> list[str]:
+        """Rules and income streams that start before the plan's first year
+        or end before they start. Not errors: the plan counts an early start
+        from its first year, and an end before the start means never."""
+        notes = []
+        y0, prof = self.start_year, self.profile
+        items = [(r.describe(prof, {a.id: a for a in self.accounts}), r.start, r.end) for r in self.rules]
+        items += [(s.label(prof), s.start, s.end) for s in self.incomes]
+        for name, start, end in items:
+            first = start.resolve(prof) if start else y0
+            if first < y0:
+                notes.append(f"{name}: starts in {first}, before the plan's first year; counted from {y0}")
+            if end is not None and end.resolve(prof) < max(first, y0):
+                notes.append(f"{name}: ends before it starts, so it never applies")
+        return notes
 
     def validate(self) -> list[str]:
         problems = self.profile.validate()

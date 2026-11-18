@@ -325,9 +325,12 @@ the top of the ordinary segments, because gains stack above ordinary
 income on the return; the other lines are read against the whole taxable
 bar. IRMAA lines use the tiers for the premium year two years later.
 When the income that can't be removed (Social Security, RMDs, dividends,
-gains) is already over a threshold, that year has no value for the line and
-the chart leaves a gap, with a note saying why, rather than drawing the
-removable-income limit (which would stack several lines on one value).
+gains) is already over a threshold, the line is still drawn where the
+threshold sits (inside the bar), carrying the last dollar-for-dollar step on
+below the removable income, rather than at the removable-income limit (which
+would stack several lines on one value). Every line runs the full width;
+which lines show is up to the user. IRMAA tiers are tight dots in shades of
+one colour (light for tier 1), the 0% gains band dots in another colour.
 
 Suggested lines: the brackets the bars reach plus the next one up (not
 10%), the 0% gains band if there are gains, IRMAA tiers the bars come

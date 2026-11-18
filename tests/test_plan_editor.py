@@ -321,3 +321,26 @@ def test_baseline_tab_gets_its_full_height(window):
         assert page.isVisible() and page.height() >= page.minimumSizeHint().height()
         others = [p for p in (window.form, window.plan_editor) if p is not page]
         assert all(not p.isVisible() for p in others)
+
+
+def test_timings_cannot_start_before_the_plan_or_end_before_the_start(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    rule = plan.rules[0]
+    pick(ed, rule)
+    rf = ed.forms["rules"]
+    rf.start.mode.setCurrentIndex(rf.start.mode.findData("year"))
+    assert rf.start.spin.minimum() == plan.start_year
+    rf.start.spin.setValue(plan.start_year - 5)
+    assert rule.start.resolve(plan.profile) == plan.start_year
+    rf.end.mode.setCurrentIndex(rf.end.mode.findData("year"))
+    rf.start.spin.setValue(plan.start_year + 3)
+    assert rf.end.spin.minimum() == plan.start_year + 3
+    rf.end.spin.setValue(plan.start_year)
+    assert rule.end.resolve(plan.profile) == plan.start_year + 3
+    income = plan.incomes[1]
+    pick(ed, income)
+    inf = ed.forms["incomes"]
+    inf.start.mode.setCurrentIndex(inf.start.mode.findData("year"))
+    assert inf.start.spin.minimum() == plan.start_year
+

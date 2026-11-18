@@ -322,6 +322,7 @@ class WhenEdit(QWidget):
         self.none_label = none_label
         self.plan: Plan | None = None
         self.max_year: int | None = None
+        self.min_year: int | None = None
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.mode = ComboBox()
@@ -338,6 +339,7 @@ class WhenEdit(QWidget):
 
     def set_plan(self, plan: Plan) -> None:
         self.plan = plan
+        self.min_year = plan.start_year  # nothing in a plan starts before its first year
         self._loading = True
         self.mode.clear()
         if self.none_label:
@@ -382,16 +384,29 @@ class WhenEdit(QWidget):
         self.max_year = year
         self._apply_range()
 
+    def set_min_year(self, year: int | None) -> None:
+        """Limit the timing to ``year`` at the earliest (None: the plan's first year)."""
+        if year is None and self.plan is not None:
+            year = self.plan.start_year
+        if year == self.min_year:
+            return
+        self.min_year = year
+        self._apply_range()
+
     def _apply_range(self) -> None:
         data = self.mode.currentData()
         self.spin.setVisible(data != "none")
-        top = self.max_year
+        lo, hi = self.min_year, self.max_year
+        if lo is not None and hi is not None:
+            hi = max(hi, lo)
         if data == "year":
-            self.spin.setRange(1900, 2200 if top is None else top)
+            self.spin.setRange(1900 if lo is None else lo, 2200 if hi is None else hi)
         else:
-            if top is not None and self.plan is not None and data != "none":
-                top -= self.plan.profile.people[int(data)].birth_year
-            self.spin.setRange(0, 120 if top is None else max(0, top))
+            if self.plan is not None and data != "none":
+                born = self.plan.profile.people[int(data)].birth_year
+                lo = None if lo is None else lo - born
+                hi = None if hi is None else hi - born
+            self.spin.setRange(0 if lo is None else max(0, lo), 120 if hi is None else max(0, hi))
 
     def _mode_changed(self, *_args) -> None:
         if self._loading or self.plan is None:
@@ -669,6 +684,9 @@ class IncomeForm(ItemForm):
 
     def update_rows(self) -> None:
         self.show_row(self.survivor, self.kind.currentData() in SURVIVOR_KINDS)
+        if self.plan is not None:
+            start = self.start.value()
+            self.end.set_min_year(start.resolve(self.plan.profile) if start else None)
 
 
 class PersonForm(ItemForm):
@@ -803,6 +821,9 @@ class RuleForm(ItemForm):
         # A rule on a 10-year-rule inherited IRA can't run past the deadline.
         self.start.set_max_year(deadline)
         self.end.set_max_year(deadline)
+        if self.plan is not None:
+            start = self.start.value()
+            self.end.set_min_year(max(start.resolve(self.plan.profile), self.plan.start_year) if start else None)
         self.show_row(self.deadline, deadline is not None)
         if deadline is not None:
             self.deadline.setText(f"10-year rule: ends by {deadline} at the latest")
