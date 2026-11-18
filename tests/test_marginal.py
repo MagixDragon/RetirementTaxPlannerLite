@@ -127,7 +127,7 @@ class TestDefaultVisibility:
 
 
 def test_senior_phase_out_pushing_gains_is_charged_to_senior_layer(lib):
-    """Maeve's case: MFJ, both 65+, adding LTCG while the senior deduction phases out.
+    """MFJ, both 65+, adding LTCG while the senior deduction phases out.
 
     Taxable ordinary income (59,550+) sits below the 98,900 top of the 0% band
     and gains straddle it. Each added gain dollar costs 15%, and the shrinking
