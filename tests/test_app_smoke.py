@@ -226,3 +226,78 @@ def test_file_open_recognizes_plan_files(window):
     assert window.pages.currentWidget() is window.plan_view
     window.open_file(Path("examples/profiles/retired_couple_ca.json"))
     assert window.plan_view.plan is None and window.form.profile().state == "CA"
+
+
+def _all_tooltips(window) -> set[str]:
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QTableWidget, QTreeWidget
+
+    tips = set()
+    for w in window.findChildren(QtWidgets.QWidget):
+        tips.add(w.toolTip())
+        if isinstance(w, QTableWidget):
+            for c in range(w.columnCount()):
+                head = w.horizontalHeaderItem(c)
+                tips.add(head.toolTip() if head else "")
+        if isinstance(w, QTreeWidget):
+            it = QtWidgets.QTreeWidgetItemIterator(w)
+            while it.value():
+                tips.update(it.value().toolTip(c) for c in range(w.columnCount()))
+                it += 1
+    tips.update(a.toolTip() for a in window.findChildren(QAction))
+    return tips
+
+
+def test_tooltip_lines_fit_the_smallest_screen(window):
+    """Tooltips are plain text and Qt doesn't wrap them: break lines by hand
+    at TIP_WIDTH characters (see rtpl/app/__init__.py)."""
+    from rtpl.app import TIP_WIDTH
+    from rtpl.app.plan_editor import ROLE
+    from rtpl.engine.forward import TABLE_COLUMN_KEYS
+    from rtpl.model.plan import Plan
+    from rtpl.model.profile import Profile
+
+    tips = set()
+    for state in ("CA", "NC", "WA", "MT"):  # state notes and sources from the data files
+        prof = Profile.load(Path("examples/profiles/retired_couple_ca.json"))
+        prof.state = state
+        window._load_profile(prof, None)
+        window.recompute()
+        tips |= _all_tooltips(window)
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    view = window.plan_view
+    view.set_table_columns(list(TABLE_COLUMN_KEYS))
+    for pinned in (True, False):
+        window.inputs_panel.auto_hide.setChecked(not pinned)
+        tips |= _all_tooltips(window)
+    ed = window.plan_editor
+    it = QtWidgets.QTreeWidgetItemIterator(ed.tree)
+    while it.value():  # fill each form, for tooltips set as it loads
+        if it.value().data(0, ROLE):
+            ed.tree.setCurrentItem(it.value())
+            tips |= _all_tooltips(window)
+        it += 1
+    long = sorted({line for t in tips for line in t.split("\n") if len(line) > TIP_WIDTH})
+    assert not long, f"Tooltip lines over {TIP_WIDTH} characters:\n" + "\n".join(long)
+
+
+def test_year_table_hides_a_tooltip_over_a_cell_without_one(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QToolTip
+
+    from rtpl.model.plan import Plan
+
+    path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(path), path)
+    table = window.plan_view.table
+    for c in range(table.columnCount()):  # every header explains itself or names itself
+        assert table.horizontalHeaderItem(c).toolTip()
+    QToolTip.showText(table.mapToGlobal(QPoint(5, 5)), "stale tooltip", table)
+    event = QHelpEvent(QtCore.QEvent.Type.ToolTip, QPoint(5, 5), table.viewport().mapToGlobal(QPoint(5, 5)))
+    assert window.plan_view.eventFilter(table.viewport(), event) is True
+    from PySide6.QtTest import QTest
+
+    QTest.qWait(600)  # Qt hides a tooltip after a short fade
+    assert not QToolTip.isVisible()

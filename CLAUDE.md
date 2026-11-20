@@ -7,3 +7,9 @@
   `main` with a new version publishes a GitHub Release. See
   `docs/packaging.md`.
 * Run the tests with `QT_QPA_PLATFORM=offscreen uv run --extra dev pytest -q`.
+* **Tooltips** are plain text and Qt doesn't wrap them. Break each line
+  with `\n` at 70 characters or fewer (`TIP_WIDTH` in
+  `src/rtpl/app/__init__.py`), so they fit the smallest supported screen
+  (1024 pixels wide). Wrap text from data files or the user's own names
+  with `textwrap.fill(..., TIP_WIDTH)`. A test in `tests/test_app_smoke.py`
+  fails on longer lines.

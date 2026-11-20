@@ -8,11 +8,12 @@ the last change did to lifetime tax and final balances.
 
 from __future__ import annotations
 
+import textwrap
 from html import escape
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,10 +27,12 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
+from rtpl.app import TIP_WIDTH
 from rtpl.charts.forward_chart import line_short_label, render_balances, render_income
 from rtpl.engine.forward import (
     DEFAULT_TABLE_COLUMNS,
@@ -112,7 +115,7 @@ class PlanView(QWidget):
         tlay.setContentsMargins(0, 4, 0, 0)
         bar = QHBoxLayout()
         self.columns_button = QPushButton("C&olumns…")
-        self.columns_button.setToolTip("Choose the year table's columns (also on the column headers' right-click menu)")
+        self.columns_button.setToolTip("Choose the year table's columns\n(also on the column headers' right-click menu)")
         self.columns_menu = QMenu(self)
         self.columns_menu.setToolTipsVisible(True)
         self.column_actions: dict[str, QAction] = {}
@@ -137,6 +140,10 @@ class PlanView(QWidget):
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(
             lambda pos: self.columns_menu.exec(header.mapToGlobal(pos)))
+        # Qt leaves a tooltip up when the mouse moves on to a header or cell
+        # without one; hide it instead.
+        header.viewport().installEventFilter(self)
+        self.table.viewport().installEventFilter(self)
         tlay.addWidget(self.table, 1)
         self.tabs.addTab(table_page, "&Year table")
         lay.addWidget(self.tabs, 1)
@@ -318,8 +325,10 @@ class PlanView(QWidget):
         self.table.setColumnCount(len(data.header))
         for c, (label, tip) in enumerate(zip(data.header, data.tips)):
             head = QTableWidgetItem(label)
-            if tip:
-                head.setToolTip(tip)
+            # Every header gets a tooltip: its explanation, or else its full
+            # name (which a narrow column may cut off).
+            name = textwrap.fill(label, TIP_WIDTH)
+            head.setToolTip(tip or name)
             self.table.setHorizontalHeaderItem(c, head)
         self.table.setRowCount(len(data.rows))
         for r, row in enumerate(data.rows):
@@ -332,6 +341,20 @@ class PlanView(QWidget):
                                               else "#b42318"))
                 self.table.setItem(r, c, item)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            header = self.table.horizontalHeader()
+            if obj is header.viewport():
+                item = self.table.horizontalHeaderItem(header.logicalIndexAt(event.pos()))
+            elif obj is self.table.viewport():
+                item = self.table.itemAt(event.pos())
+            else:
+                return super().eventFilter(obj, event)
+            if item is None or not item.toolTip():
+                QToolTip.hideText()
+                return True
+        return super().eventFilter(obj, event)
 
     def current_figure(self) -> Figure:
         return self.bal_fig if self.tabs.currentIndex() == 1 else self.income_fig

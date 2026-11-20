@@ -1077,30 +1077,36 @@ TABLE_COLUMNS: tuple[TableColumn, ...] = (
     TableColumn("ages", "Ages", True),
     TableColumn("filing", "Filing status", True),
     TableColumn("income", "Income by type", True,
-                "One column per income type, or per source with \"Show each source separately\""),
+                "One column per income type, or per source with\n\"Show each source separately\""),
     TableColumn("total_income", "Total income", True),
     TableColumn("agi", "AGI", True),
     TableColumn("taxable_income", "Taxable income", True),
-    TableColumn("irmaa_magi", "IRMAA MAGI", True, "AGI plus tax-exempt interest; sets Medicare premiums two years later"),
+    TableColumn("irmaa_magi", "IRMAA MAGI", True,
+                "AGI plus tax-exempt interest;\nsets Medicare premiums two years later"),
     TableColumn("gains_by_rate", "Gains and qualified dividends by rate (0% / 15% / 20%)", False,
-                "Qualified dividends and long-term gains by the federal rate they are taxed at; "
-                "any under the deductions count as 0%"),
+                "Qualified dividends and long-term gains by the federal rate\n"
+                "they are taxed at; any under the deductions count as 0%"),
     TableColumn("marginal_rate", "Marginal rate on the next $1,000", False,
-                "Federal and state tax on $1,000 more ordinary income (an IRA withdrawal or Roth conversion), "
-                "as a rate. Shows the years where Social Security or the gains \"bump zone\" raise it."),
+                "Federal and state tax on $1,000 more ordinary income\n"
+                "(an IRA withdrawal or Roth conversion), as a rate. Shows the\n"
+                "years where Social Security or the gains \"bump zone\" raise it."),
     TableColumn("federal_tax", "Federal tax", True),
     TableColumn("state_tax", "State tax", True),
     TableColumn("irmaa", "IRMAA surcharge", True),
     TableColumn("total_tax", "Total tax", False, "Federal and state tax plus IRMAA surcharges"),
     TableColumn("spending", "Spending", True, "The year's spending (Assumptions), grown with inflation"),
     TableColumn("net_cash_flow", "Net cash flow", True,
-                "Income, Social Security and withdrawals by rule, less spending, tax and IRMAA. A surplus is "
-                "saved; a deficit is taken from the accounts in the spending order."),
+                "Income, Social Security and withdrawals by rule,\n"
+                "less spending, tax and IRMAA.\n"
+                "A surplus is saved; a deficit is taken from the accounts\n"
+                "in the spending order."),
     TableColumn("shortfall", "Shortfall", False, "Spending and tax the spending order could not cover"),
-    TableColumn("rmds", "RMDs by account", False, "RMDs and required inherited IRA withdrawals, one column per account"),
+    TableColumn("rmds", "RMDs by account", False,
+                "RMDs and required inherited IRA withdrawals,\none column per account"),
     TableColumn("conversions", "Roth conversions by account", False, "One column per account converted from"),
     TableColumn("withdrawals", "Other withdrawals by account", False,
-                "Withdrawal rules, and sales or withdrawals that pay for spending, one column per account"),
+                "Withdrawal rules, and sales or withdrawals that pay for spending,\n"
+                "one column per account"),
     TableColumn("balances", "Balances by account", False, "Each account's balance at the end of the year"),
     TableColumn("total_balances", "Total balances", True, "All accounts at the end of the year"),
     TableColumn("notes", "Notes", True),
