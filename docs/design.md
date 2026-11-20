@@ -391,7 +391,10 @@ balances. The choice is saved in the plan file (`table_columns`; empty
 means the suggested set), and *Show each source separately* splits the
 income columns the way it splits the bars. Net cash flow is income,
 Social Security and rule withdrawals less spending, tax and IRMAA: a
-surplus is saved, a deficit comes from the spending order.
+surplus is saved, a deficit comes from the spending order. **File ▸ Export
+Year Table…** saves the table as shown (the chosen columns, today's
+dollars, each source) as an OpenDocument spreadsheet (.ods, with money
+and rates as numbers) or as CSV.
 
 A *today's dollars* switch divides every amount by inflation since the
 first year.

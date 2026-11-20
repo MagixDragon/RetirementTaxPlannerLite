@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from rtpl import __version__
 from rtpl.app import TIP_WIDTH
+from rtpl.export import write_csv, write_ods
 from rtpl.app.icon import about_pixmap
 from rtpl.app.inputs import ComboBox
 from rtpl.app.plan_editor import PlanEditor
@@ -411,6 +412,8 @@ class MainWindow(QMainWindow):
     def _set_plan(self, plan: Plan | None) -> None:
         self.plan_view.set_plan(plan)
         self.plan_editor.set_plan(plan)
+        if hasattr(self, "export_table_action"):
+            self.export_table_action.setEnabled(plan is not None)
         self._sync_input_tabs()
 
     def _recompute_plan(self) -> None:
@@ -507,6 +510,11 @@ class MainWindow(QMainWindow):
         m.addAction(QAction("Save Pla&n As…", self, shortcut="Ctrl+Alt+S", triggered=self.save_plan_as))
         m.addSeparator()
         m.addAction(QAction("&Export Chart…", self, shortcut="Ctrl+E", triggered=self.export_chart))
+        self.export_table_action = QAction("Export &Year Table…", self, shortcut="Ctrl+Shift+E",
+                                           triggered=self.export_year_table)
+        self.export_table_action.setToolTip("Save the forward plan's year table as a spreadsheet (.ods)\nor CSV")
+        self.export_table_action.setEnabled(False)
+        m.addAction(self.export_table_action)
         m.addSeparator()
         m.addAction(QAction("E&xit", self, shortcut=QKeySequence.StandardKey.Quit, triggered=self.close))
 
@@ -819,6 +827,28 @@ class MainWindow(QMainWindow):
             fig = self.plan_view.current_figure() if self.pages.currentWidget() is self.plan_view else self.figure
             fig.savefig(path, dpi=200, facecolor=fig.get_facecolor())
             self.statusBar().showMessage(f"Exported {path}", 4000)
+
+    def export_year_table(self) -> None:
+        """Save the year table as shown (columns, dollars, each source) as .ods or .csv."""
+        if self.plan_view.result is None:
+            return
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export Year Table", self._suggested_plan_path(".ods"),
+            "OpenDocument spreadsheet (*.ods);;CSV (*.csv)")
+        if not path:
+            return
+        if not path.lower().endswith((".ods", ".csv")):
+            path += ".csv" if "csv" in chosen.lower() else ".ods"
+        data = self.plan_view.table_export()
+        try:
+            if path.lower().endswith(".csv"):
+                write_csv(path, data.header, data.rows)
+            else:
+                write_ods(path, data.header, data.rows, data.numeric)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export Year Table", f"Could not save {path}:\n{exc}")
+            return
+        self.statusBar().showMessage(f"Exported {path}", 4000)
 
     def about(self) -> None:
         years = ", ".join(str(y) for y in self.library.enacted_years)

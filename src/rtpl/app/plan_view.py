@@ -342,6 +342,12 @@ class PlanView(QWidget):
                 self.table.setItem(r, c, item)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
+    def table_export(self):
+        """The year table as shown (columns, today's dollars, each source), for export."""
+        assert self.result is not None
+        return table_data(self.result, todays_dollars=self.todays.isChecked(), columns=self.table_columns(),
+                          detail=self.detail.isChecked())
+
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.ToolTip:
             header = self.table.horizontalHeader()

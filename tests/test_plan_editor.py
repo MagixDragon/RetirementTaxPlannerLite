@@ -477,3 +477,22 @@ def test_account_form_rmd_already_taken(window):
     assert window.plan_view.result.years[0].balances_end["alex_inh"] > before
     form.rmd_taken.setChecked(False)
     assert inh.rmd_taken_year is None
+
+
+def test_export_year_table(window, tmp_path, monkeypatch):
+    import zipfile
+
+    from PySide6.QtWidgets import QFileDialog
+
+    assert window.export_table_action.isEnabled()
+    window.plan_view.set_table_columns(["spending", "notes"])
+    for name in ("table.ods", "table.csv"):
+        target = tmp_path / name
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+        window.export_year_table()
+        assert target.exists()
+    assert (tmp_path / "table.csv").read_text(encoding="utf-8").splitlines()[0] == "Year,Spending,Notes"
+    assert b"Spending" in zipfile.ZipFile(tmp_path / "table.ods").read("content.xml")
+    window.setWindowModified(False)  # no save prompt
+    window.new_profile()  # no plan: nothing to export
+    assert not window.export_table_action.isEnabled()
