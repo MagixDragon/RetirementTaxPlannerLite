@@ -283,6 +283,7 @@ class MainWindow(QMainWindow):
         self._plan_timer.timeout.connect(self._recompute_plan)
         self.plan_editor.changed.connect(self._plan_timer.start)
         self.plan_editor.changed.connect(self._mark_modified)
+        self.plan_view.columns_changed.connect(self._mark_modified)
         self._sync_input_tabs()
 
         self._load_profile(self._starter_profile(), None)

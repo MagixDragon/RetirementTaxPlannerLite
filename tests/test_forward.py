@@ -526,3 +526,119 @@ def test_successor_of_a_stretching_inherited_ira_gets_ten_years(lib):
     assert any("empty it by 2040" in n for n in by_year[2031].notes)
     assert by_year[2040].balances_end["inh"] == pytest.approx(0.0)
     assert by_year[2039].balances_end["inh"] > 0
+
+
+# -- group 3: year table columns, spousal top-up, RMD already taken ----------------
+
+
+def test_year_table_default_and_all_columns(lib):
+    from rtpl.engine.forward import DEFAULT_TABLE_COLUMNS, TABLE_COLUMN_KEYS, table_data
+
+    plan = Plan.load(EXAMPLE)
+    res = run_plan(plan, lib, with_lines=False)
+    header, rows = year_table(res)
+    assert header[0] == "Year" and header[-1] == "Notes"
+    assert "Spending" in header and "Net cash flow" in header
+    assert "Marginal rate" not in header and not any(h.endswith(" balance") for h in header)
+    assert year_table(res, columns=list(DEFAULT_TABLE_COLUMNS)) == (header, rows)
+    full = table_data(res, columns=TABLE_COLUMN_KEYS)
+    assert len(full.header) == len(full.tips) == len(full.numeric) == len(full.rows[0])
+    for name in ("Marginal rate", "Gains taxed at 0%", "Gains taxed at 15%", "Total tax", "Shortfall"):
+        assert name in full.header
+    # Per-account columns use the names the accounts start with.
+    assert "Alex Traditional IRA balance" in full.header
+    assert "Alex Traditional IRA conversion" in full.header
+    assert not any("inherited from spouse" in h for h in full.header)
+    # Only the picked columns (in table order, Year always first).
+    h, r = year_table(res, columns=["notes", "spending"])
+    assert h == ["Year", "Spending", "Notes"] and len(r[0]) == 3
+
+
+def test_year_table_values_add_up(lib):
+    plan = Plan.load(EXAMPLE)
+    res = run_plan(plan, lib, with_lines=False)
+    for yr in res.years:
+        ct = yr.category_totals()
+        required = sum(s.amount for s in yr.sources if s.label.endswith(("RMD", "required withdrawal")))
+        assert sum(yr.rmds.values()) == pytest.approx(required, abs=1)
+        assert sum(yr.conversions.values()) == pytest.approx(ct["roth_conversion"], abs=1)
+        # Preferential income by rate is all of the year's dividends and gains.
+        assert sum(yr.gains_by_rate.values()) == pytest.approx(yr.tax.qualified_dividends + yr.tax.net_ltcg, abs=1)
+        assert 0 <= yr.marginal_rate < 0.7
+
+
+def test_net_cash_flow_and_shortfall(lib):
+    prof = single(birth=1960)
+    lives_to(prof, 67)
+    plan = Plan(
+        profile=prof,
+        accounts=[Account(id="cash", kind="cash", owner=None, balance=20_000)],
+        incomes=[IncomeStream(kind="pension", amount=30_000, owner=0, cola="none")],
+        assumptions=Assumptions(spending=50_000, return_rate=0.0, cash_return=0.0),
+    )
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.net_cash_flow == pytest.approx(30_000 - 50_000 - y0.tax.total_tax, abs=1)
+    assert y0.withdrawals["cash"] == pytest.approx(20_000)
+    assert y0.shortfall == pytest.approx(-y0.net_cash_flow - 20_000, abs=1)
+    _h, r = year_table(run_plan(plan, lib, with_lines=False), columns=["net_cash_flow", "shortfall"])
+    assert r[0][1].startswith("-") and r[0][2] != "0"
+
+
+def test_marginal_rate_on_the_next_thousand(lib):
+    prof = single(birth=1980)
+    lives_to(prof, 46)
+    plan = Plan(profile=prof, incomes=[IncomeStream(kind="wages", amount=100_000, owner=0, cola="none")])
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.marginal_rate == pytest.approx(0.22)  # federal only, no state
+
+
+def test_table_columns_round_trip(tmp_path):
+    plan = Plan.load(EXAMPLE)
+    assert plan.table_columns == []
+    plan.table_columns = ["ages", "balances", "notes"]
+    path = tmp_path / "p.json"
+    plan.save(path)
+    assert Plan.load(path).table_columns == ["ages", "balances", "notes"]
+
+
+def test_spousal_topup_summary():
+    from rtpl.engine.forward import spousal_topup
+
+    prof = couple(births=(1964, 1964))
+    lives_to(prof, 90)
+    plan = Plan(
+        profile=prof,
+        people=[
+            PersonPlan(social_security=SocialSecurity(fra_benefit=40_000, claim_age=67)),
+            PersonPlan(social_security=SocialSecurity(fra_benefit=10_000, claim_age=62)),
+        ],
+    )
+    big, small = spousal_topup(plan, 0), spousal_topup(plan, 1)
+    assert big.amount == 0 and "at least half" in big.reason
+    # B files at 62 but the top-up waits for A at 67, B's full retirement age: no reduction.
+    assert small.amount == pytest.approx(10_000) and small.start_year == 2031 and small.age == 67
+    assert small.waits_for_spouse and small.spouse == "A"
+    plan.people[0].social_security.claim_age = 62
+    early = spousal_topup(plan, 1)
+    assert early.amount == pytest.approx(10_000 * 0.65) and early.start_year == 2026 and not early.waits_for_spouse
+    assert spousal_topup(Plan(profile=single()), 0) is None
+
+
+def test_rmd_already_taken_counts_as_income_but_not_twice(lib):
+    def run(taken):
+        plan = Plan(profile=single(), accounts=[
+            Account(id="ira", kind="traditional_ira", balance=1_000_000, rmd_taken_year=2026 if taken else None)])
+        return run_plan(plan, lib, with_lines=False)
+
+    normal, taken = run(False).years[0], run(True).years[0]
+    assert normal.category_totals()["rmd"] == pytest.approx(1_000_000 / 24.6)
+    # The balance entered is after the RMD: RMD = B / (period - 1).
+    assert taken.category_totals()["rmd"] == pytest.approx(1_000_000 / 23.6)
+    assert taken.rmds["ira"] == pytest.approx(1_000_000 / 23.6)
+    assert taken.balances_end["ira"] == pytest.approx(1_000_000 * 1.05)
+    assert "ira" not in taken.withdrawals
+    # Only while that year is the plan's first year.
+    plan = Plan(profile=single(year=2027, birth=1952), accounts=[
+        Account(id="ira", kind="traditional_ira", balance=1_000_000, rmd_taken_year=2026)])
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.balances_end["ira"] < 1_000_000 * 1.05

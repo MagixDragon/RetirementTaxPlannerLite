@@ -275,6 +275,13 @@ ages 63 to 70" plus "2031: convert $0" skips one year without splitting
 the range. A withdrawal rule's amount is the year's total from that
 account, so an RMD counts toward it; conversions come on top of RMDs.
 
+**RMD already taken.** A plan started mid-year can mark a traditional or
+inherited account's RMD as already taken for the first year
+(`rmd_taken_year`). The entered balance is then after the RMD, so the RMD
+is worked out as balance / (period − 1), counted as that year's income,
+and not taken from the balance again. Storing the year, not a yes/no,
+means it stops applying once the plan starts in a later year.
+
 ### The yearly loop
 
 1. Accounts of someone who died the year before pass to the survivor
@@ -302,6 +309,10 @@ account, so an RMD counts toward it; conversions come on top of RMDs.
    one's own, reduced if started early) once both have filed, which makes
    "claim my own at 62, switch to spousal when my spouse files" happen on
    its own; deemed filing means "spousal first, own later" is not offered.
+   Either person can get the top-up. The person form shows it as a
+   read-only line ("Spousal top-up: $3,000 a year from 2034 (age 68)"),
+   says when a $0 own benefit means spousal only, and warns when the
+   person files before the spouse, since the top-up waits for the spouse.
    After a death, the survivor gets the larger of their own benefit and the
    deceased's (at least 82.5% of the deceased's full benefit if they had
    claimed). SSDI is paid at the full benefit and becomes a retirement
@@ -367,9 +378,20 @@ near if anyone will be on Medicare, and ACA if the household buys
 marketplace coverage.
 
 **Balances.** Year-end balances by account type (or by account), colored
-to match the income each feeds. **Year table.** Every year's income by
-category, AGI, taxable income, MAGI, federal and state tax, IRMAA, total
-balances and notes, for screen readers and copying.
+to match the income each feeds. **Year table.** For screen readers and
+copying. The suggested columns are ages, filing status, income by
+category, total income, AGI, taxable income, IRMAA MAGI, federal and state
+tax, IRMAA, spending, net cash flow, total balances and notes. The
+**Columns…** button (also the column headers' right-click menu) adds or
+removes: qualified dividends and gains by the rate they are taxed at (0%,
+15%, 20%; any under the deductions count as 0%), the marginal rate on the
+next $1,000 of ordinary income (federal and state), total tax, the
+shortfall, and per-account RMDs, Roth conversions, other withdrawals and
+balances. The choice is saved in the plan file (`table_columns`; empty
+means the suggested set), and *Show each source separately* splits the
+income columns the way it splits the bars. Net cash flow is income,
+Social Security and rule withdrawals less spending, tax and IRMAA: a
+surplus is saved, a deficit comes from the spending order.
 
 A *today's dollars* switch divides every amount by inflation since the
 first year.

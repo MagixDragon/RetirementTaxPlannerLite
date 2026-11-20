@@ -416,3 +416,64 @@ def test_life_expectancy_is_on_the_baseline(window):
     assert plan.profile.people[1].life_expectancy == 80
     assert plan.end_year == max(1964 + 88, 1966 + 80)  # the plan ends when the last person dies
     assert window.plan_view.result.years[-1].year == plan.end_year
+
+
+def test_year_table_column_picker(window):
+    from rtpl.engine.forward import DEFAULT_TABLE_COLUMNS
+
+    view = window.plan_view
+    plan = view.plan
+    headers = lambda: [view.table.horizontalHeaderItem(c).text() for c in range(view.table.columnCount())]
+    assert "Spending" in headers() and "Net cash flow" in headers()
+    assert view.column_actions["notes"].isChecked() and not view.column_actions["balances"].isChecked()
+    window.setWindowModified(False)
+    view.column_actions["balances"].setChecked(True)
+    assert "Alex Traditional IRA balance" in headers()
+    assert "balances" in plan.table_columns and window.isWindowModified()
+    view.column_actions["notes"].setChecked(False)
+    assert "Notes" not in headers()
+    # Header tooltips explain the column.
+    col = headers().index("Net cash flow")
+    assert "spending order" in view.table.horizontalHeaderItem(col).toolTip()
+    # Show each source separately splits the income columns too.
+    n = view.table.columnCount()
+    view.detail.setChecked(True)
+    assert view.table.columnCount() > n
+    view.detail.setChecked(False)
+    view._reset_columns()
+    assert plan.table_columns == [] and view.table_columns() == list(DEFAULT_TABLE_COLUMNS)
+    assert "Notes" in headers()
+
+
+def test_person_form_shows_the_spousal_top_up(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    pf = ed.forms["people"]
+    pick(ed, plan.people[0])
+    assert pf.spousal.text().startswith("None (own benefit is at least half of Sam's")
+    pick(ed, plan.people[1])
+    # Sam (16,000) files at 62; half of Alex's 38,000 is 19,000, so a 3,000 top-up from Alex's claim at 70.
+    assert pf.spousal.text() == "$3,000 a year from 2034 (age 68), in today's dollars"
+    assert "waits until Alex files in 2034" in pf.spousal_hint.text()
+    assert "Either of you" in pf.spousal_hint.text()
+    pf.fra.setValue(0)
+    assert pf.spousal.text().startswith("$19,000 a year from 2034")
+    assert "spousal benefit only" in pf.spousal_hint.text()
+
+
+def test_account_form_rmd_already_taken(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    form = ed.forms["accounts"]
+    pick(ed, plan.account("alex_ira"))  # Alex is 62: no RMD yet
+    assert form.form.isRowVisible(form.rmd_taken) is False
+    inh = plan.account("alex_inh")
+    pick(ed, inh)
+    assert form.form.isRowVisible(form.rmd_taken)
+    before = window.plan_view.result.years[0].balances_end["alex_inh"]
+    form.rmd_taken.setChecked(True)
+    assert inh.rmd_taken_year == plan.start_year
+    window.plan_view.recompute()
+    assert window.plan_view.result.years[0].balances_end["alex_inh"] > before
+    form.rmd_taken.setChecked(False)
+    assert inh.rmd_taken_year is None
