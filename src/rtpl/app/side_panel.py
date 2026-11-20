@@ -84,6 +84,9 @@ class PanelTabs(QWidget):
     def widget(self, index: int) -> QWidget:
         return self.pages[index]
 
+    def indexOf(self, page: QWidget) -> int:  # noqa: N802
+        return self.pages.index(page) if page in self.pages else -1
+
     def currentIndex(self) -> int:  # noqa: N802
         return self._current
 

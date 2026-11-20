@@ -93,14 +93,17 @@ def pick(editor, obj):
 def test_plan_items_tab_lists_the_plan(window):
     ed = window.plan_editor
     plan = window.plan_view.plan
-    assert window.input_tabs.isTabVisible(0) and window.input_tabs.currentWidget() is ed
+    # Baseline comes first, then Plan items (shown, and picked, with a plan open).
+    assert window.input_tabs.widget(0) is window.form and window.input_tabs.widget(1) is ed
+    assert window.input_tabs.isTabVisible(1) and window.input_tabs.currentWidget() is ed
     assert "Plan" in window.inputs_panel.title.text()
     counts = {k: g.childCount() for k, g in ed.groups.items()}
     assert counts == {"accounts": 6, "incomes": 4, "people": 2, "rules": 4, "assumptions": 1}
+    assert ed.tree.topLevelItem(0).text(0) == "Assumptions"  # at the top of the list
     assert find_item(ed, plan.rules[1]).text(0) == "Convert Alex Traditional IRA: fill to top of the 22% bracket"
     # The marginal graph page shows only the profile.
     window.pages.setCurrentIndex(0)
-    assert not window.input_tabs.isTabVisible(0) and window.input_tabs.currentWidget() is window.form
+    assert not window.input_tabs.isTabVisible(1) and window.input_tabs.currentWidget() is window.form
     assert "Inputs" in window.inputs_panel.title.text()
 
 
@@ -194,19 +197,30 @@ def test_save_plan_writes_edits(window, tmp_path):
 
 
 def test_assumptions_and_person_forms(window):
+    from PySide6.QtCore import Qt
+
+    from rtpl.app.plan_editor import ROLE
+
     ed = window.plan_editor
     plan = window.plan_view.plan
     pick(ed, plan.assumptions)
     form = ed.forms["assumptions"]
     form.spending.setValue(90000)
-    assert form.inflation.is_default() and not form.inflation.field.isEnabled()
-    assert form.inflation.field.value() == pytest.approx(100 * plan.profile.inflation)
-    form.inflation.check.setChecked(False)
-    form.inflation.field.setValue(3.0)
-    assert plan.assumptions.spending == 90000 and plan.assumptions.inflation == pytest.approx(0.03)
-    assert form.cola.is_default() and form.cola.field.value() == pytest.approx(3.0)  # shows inflation
-    form.inflation.check.setChecked(True)
-    assert plan.assumptions.inflation is None
+    assert plan.assumptions.spending == 90000
+    # One inflation rate, on the Baseline: shown here, read only.
+    assert form.inflation.text() == f"{100 * plan.profile.inflation:.2f}%\nChange it on the Baseline tab"
+    assert form.cola.is_default() and form.cola.field.value() == pytest.approx(100 * plan.profile.inflation)
+    assert not hasattr(form, "end_age")
+    form.survivor.setValue(70)
+    assert plan.assumptions.survivor_spending_pct == pytest.approx(0.7)
+    # Spending order: tick the traditional accounts and move them up.
+    assert form.order.value() == ["cash", "taxable"]
+    trad = next(i for i in range(form.order.list.count()) if form.order.list.item(i).data(ROLE) == "traditional")
+    form.order.list.item(trad).setCheckState(Qt.CheckState.Checked)
+    assert plan.assumptions.spending_order == ["cash", "taxable", "traditional"]
+    form.order.list.setCurrentRow(trad)
+    form.order.move(-1)
+    assert plan.assumptions.spending_order == ["cash", "traditional", "taxable"]
     assert form.form.labelForField(form.magi1).text() == f"IRMAA MAGI for {plan.start_year - 2}"
     form.magi1.setValue(0)
     assert form.magi1.text() == "Not entered" and str(plan.start_year - 2) not in plan.assumptions.prior_magi
@@ -219,12 +233,14 @@ def test_assumptions_and_person_forms(window):
     assert "claims at 67 and 5 months" in find_item(ed, plan.people[1]).text(0)
     pf.claim.years.setValue(70)
     assert pf.claim.months.maximum() == 0 and plan.people[1].social_security.claim_age == 70
-    assert not pf.death.is_default() and pf.death.field.value() == plan.people[1].death_age
-    pf.death.field.setValue(90)
-    assert plan.people[1].death_age == 90
-    pf.death.check.setChecked(True)
-    assert plan.people[1].death_age is None and not pf.death.field.isEnabled()
-    assert pf.death.field.value() == plan.assumptions.end_age  # shows what "end of plan" means
+    # Life expectancy is on the Baseline now; the panel says so.
+    assert not hasattr(pf, "death")
+    assert pf.life_note.text().startswith(str(plan.profile.people[1].life_expectancy))
+    # The SS COLA shows on the panel, with where to change it.
+    assert "same as inflation" in pf.cola_note.text()
+    assert "Change it in Assumptions ▸ Social Security COLA" in pf.cola_note.text()
+    pf.fra.setValue(0)
+    assert pf.fra.text() == "No Social Security"
     pf.ssdi.setChecked(True)
     assert pf.ssdi_end.is_default() and plan.people[1].social_security.ssdi_end_age is None
     pf.ssdi_end.check.setChecked(False)
@@ -256,16 +272,24 @@ def test_account_form_cash_basis_and_inherited_deadline(window):
     assert form.form.isRowVisible(form.cash_note) and "Cash return" in form.cash_note.text()
     inherited = next(a for a in plan.accounts if a.kind == "inherited_ira")
     pick(ed, inherited)
-    assert f"empty by {inherited.deadline_year}" in form.deadline.text()
+    deadline = inherited.deadline_year(plan.profile)
+    assert form.deadline.text() == f"10-year rule: empty by {deadline}"
+    # Who inherited it decides the rule.
+    form.beneficiary.setCurrentIndex(form.beneficiary.findData("disabled"))
+    assert inherited.beneficiary == "disabled" and form.deadline.text().startswith("Lifetime withdrawals")
+    form.beneficiary.setCurrentIndex(form.beneficiary.findData("other"))
+    form.inherited_year.setValue(2018)
+    assert form.deadline.text() == "Lifetime withdrawals: inherited before 2020"
+    form.inherited_year.setValue(2024)
     # A rule on it can't end after the deadline.
     rule = next(r for r in plan.rules if r.account == inherited.id)
     pick(ed, rule)
     rf = ed.forms["rules"]
     assert rf.form.isRowVisible(rf.deadline)
     rf.end.mode.setCurrentIndex(rf.end.mode.findData("year"))
-    rf.end.spin.setValue(inherited.deadline_year + 5)
-    assert rf.end.spin.maximum() == inherited.deadline_year
-    assert rule.end.resolve(plan.profile) == inherited.deadline_year
+    rf.end.spin.setValue(deadline + 5)
+    assert rf.end.spin.maximum() == deadline
+    assert rule.end.resolve(plan.profile) == deadline
 
 
 def test_new_plan_from_profile_can_be_built_in_the_app(window):
@@ -344,3 +368,51 @@ def test_timings_cannot_start_before_the_plan_or_end_before_the_start(window):
     inf.start.mode.setCurrentIndex(inf.start.mode.findData("year"))
     assert inf.start.spin.minimum() == plan.start_year
 
+
+
+def test_death_timings_cola_and_growing_rule_amounts(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    alex, sam = plan.profile.people
+    # An income can start after a death and end at one.
+    stream = plan.incomes[1]  # Alex's pension
+    pick(ed, stream)
+    form = ed.forms["incomes"]
+    form.end.mode.setCurrentIndex(form.end.mode.findData("event:first_death"))
+    assert stream.end.event == "first_death" and not form.end.spin.isVisible()
+    assert form.end.result.text() == f"= {plan.death_year(0)}"
+    assert form.start.mode.findData("event:last_death") < 0  # "End of plan" is not a start
+    form.start.mode.setCurrentIndex(form.start.mode.findData("event:death:0"))
+    assert stream.start.event == "death:0" and form.start.result.text() == f"= {plan.death_year(0) + 1}"
+    assert form.start.mode.itemText(form.start.mode.currentIndex()) == f"After {alex.name} dies"
+    # COLA choices; the fixed rate shows only for Fixed %, with the floor/cap note for pensions.
+    assert form.form.labelForField(form.cola).text() == "COLA"
+    assert form.form.isRowVisible(form.cola_note) and "floor or cap" in form.cola_note.text()
+    form.cola.setCurrentIndex(form.cola.findData("ss_cola"))
+    assert stream.cola == "ss_cola" and not form.form.isRowVisible(form.growth)
+    form.cola.setCurrentIndex(form.cola.findData("fixed"))
+    assert form.form.isRowVisible(form.growth)
+    form.kind.setCurrentIndex(form.kind.findData("interest"))
+    assert form.form.labelForField(form.cola).text() == "Yearly increase"
+    assert not form.form.isRowVisible(form.cola_note)
+    # A fixed rule amount can grow with inflation.
+    rule = next(r for r in plan.rules if r.mode == "fixed" and r.kind == "withdrawal")
+    pick(ed, rule)
+    rf = ed.forms["rules"]
+    assert rf.form.isRowVisible(rf.growth) and not rf.form.isRowVisible(rf.growth_rate)
+    rf.growth.setCurrentIndex(rf.growth.findData("fixed"))
+    rf.growth_rate.setValue(2.0)
+    assert rule.growth == "fixed" and rule.growth_rate == pytest.approx(0.02)
+    assert rf.end.mode.itemText(rf.end.mode.currentIndex()) == "End of plan"
+
+
+def test_life_expectancy_is_on_the_baseline(window):
+    plan = window.plan_view.plan
+    box = window.form.person_boxes[1]
+    assert box.life.value() == plan.profile.people[1].life_expectancy == 94
+    box.life.setValue(80)
+    window._timer.timeout.emit()
+    plan = window.plan_view.plan
+    assert plan.profile.people[1].life_expectancy == 80
+    assert plan.end_year == max(1964 + 88, 1966 + 80)  # the plan ends when the last person dies
+    assert window.plan_view.result.years[-1].year == plan.end_year
