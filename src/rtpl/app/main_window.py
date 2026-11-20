@@ -98,9 +98,16 @@ class AppStyle(QProxyStyle):
 
 def apply_app_theme(app: QApplication, mode: str) -> str:
     """Apply light/dark to the Qt widgets. Returns the effective mode."""
+    hints = QGuiApplication.styleHints()
+    can_set = hasattr(hints, "setColorScheme")  # Qt 6.8 and later
     if mode == "system":
-        scheme = QGuiApplication.styleHints().colorScheme()
-        mode = "dark" if scheme == Qt.ColorScheme.Dark else "light"
+        if can_set:
+            hints.unsetColorScheme()  # forget an earlier Light or Dark choice
+        mode = "dark" if hints.colorScheme() == Qt.ColorScheme.Dark else "light"
+    elif can_set:
+        # Tell Qt too, so nothing follows the system's scheme behind our back
+        # (with Windows in dark mode, Fusion's own palette is dark).
+        hints.setColorScheme(Qt.ColorScheme.Dark if mode == "dark" else Qt.ColorScheme.Light)
     app.setStyle(AppStyle())
     pal = QPalette()
     if mode == "dark":
@@ -129,7 +136,34 @@ def apply_app_theme(app: QApplication, mode: str) -> str:
         pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#7a7970"))
         pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#7a7970"))
     else:
-        pal = app.style().standardPalette()
+        # Fusion's classic light colors, set out in full rather than taken
+        # from standardPalette(), which follows the system's dark mode.
+        c = {
+            QPalette.ColorRole.Window: "#efefef",
+            QPalette.ColorRole.WindowText: "#000000",
+            QPalette.ColorRole.Base: "#ffffff",
+            QPalette.ColorRole.Light: "#ffffff",
+            QPalette.ColorRole.Midlight: "#cacaca",
+            QPalette.ColorRole.Mid: "#b8b8b8",
+            QPalette.ColorRole.Dark: "#9f9f9f",
+            QPalette.ColorRole.Shadow: "#767676",
+            QPalette.ColorRole.AlternateBase: "#f7f7f7",
+            QPalette.ColorRole.Text: "#000000",
+            QPalette.ColorRole.Button: "#efefef",
+            QPalette.ColorRole.ButtonText: "#000000",
+            QPalette.ColorRole.BrightText: "#ffffff",
+            QPalette.ColorRole.Highlight: "#308cc6",
+            QPalette.ColorRole.HighlightedText: "#ffffff",
+            QPalette.ColorRole.ToolTipBase: "#ffffdc",
+            QPalette.ColorRole.ToolTipText: "#000000",
+            QPalette.ColorRole.PlaceholderText: "#6e6e6e",
+            QPalette.ColorRole.Link: "#0000ff",
+            QPalette.ColorRole.LinkVisited: "#ff00ff",
+        }
+        for role, color in c.items():
+            pal.setColor(role, QColor(color))
+        for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText):
+            pal.setColor(QPalette.ColorGroup.Disabled, role, QColor("#bebebe"))
     app.setPalette(pal)
     return mode
 

@@ -341,3 +341,17 @@ def test_export_report_with_and_without_plan(window, tmp_path):
     assert sections[-1].heading == "Forward plan"
     out = tmp_path / "plan.pdf"
     assert write_report(out, title, sections, charts) == 4
+
+
+def test_light_mode_uses_light_widget_colors_whatever_the_system_scheme(window):
+    from PySide6.QtGui import QPalette
+
+    app = QtWidgets.QApplication.instance()
+    window.set_theme_mode("dark")
+    assert app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    window.set_theme_mode("light")
+    pal = app.palette()
+    assert pal.color(QPalette.ColorRole.Window).lightness() > 200
+    assert pal.color(QPalette.ColorRole.Base).lightness() > 200
+    assert pal.color(QPalette.ColorRole.Mid) != pal.color(QPalette.ColorRole.Window)  # separators show
+    window.set_theme_mode("system")
