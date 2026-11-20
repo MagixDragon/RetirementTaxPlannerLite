@@ -174,11 +174,12 @@ class SidePanel(QFrame):
 
     def _pin_changed(self, pinned: bool) -> None:
         self.auto_hide.setToolTip(
-            "Auto hide is on: the panel opens over the graph and hides again when you "
-            "click the graph or press Esc. Uncheck to keep it open beside the graph."
+            "Auto hide is on: the panel opens over the graph and hides again\n"
+            "when you click the graph or press Esc. Uncheck to keep it open\n"
+            "beside the graph."
             if not pinned
-            else "Auto hide is off: the panel stays open beside the graph. Check to have "
-            "it open over the graph only when you need it."
+            else "Auto hide is off: the panel stays open beside the graph.\n"
+            "Check to have it open over the graph only when you need it."
         )
         # Floating panels get a highlight border so they never look pinned.
         self.setProperty("floating", not pinned)

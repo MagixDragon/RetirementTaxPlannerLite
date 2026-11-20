@@ -108,6 +108,21 @@ class YearResult:
     shortfall: float
     lines: dict[str, float | None] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # Money out of each account (account id -> amount): RMDs and required
+    # inherited withdrawals, Roth conversions, and everything else taken
+    # (withdrawal rules and sales or withdrawals that pay for spending).
+    rmds: dict[str, float] = field(default_factory=dict)
+    conversions: dict[str, float] = field(default_factory=dict)
+    withdrawals: dict[str, float] = field(default_factory=dict)
+    # Income and Social Security received, less spending, tax and IRMAA
+    # surcharges: a surplus is saved; a deficit is taken from the spending
+    # order, and what that can't cover is the shortfall.
+    net_cash_flow: float = 0.0
+    # Federal + state tax on the next $1,000 of ordinary income, as a rate.
+    marginal_rate: float = 0.0
+    # Qualified dividends and long-term gains by the federal rate they are
+    # taxed at (rate -> amount); any sheltered by deductions count as 0%.
+    gains_by_rate: dict[float, float] = field(default_factory=dict)
 
     def category_totals(self) -> dict[str, float]:
         out = {c: 0.0 for c in CATEGORIES}
@@ -183,6 +198,56 @@ class _Year:
             setattr(self, attr, d + amount)
 
 
+def ss_claim_year(plan: Plan, i: int) -> int:
+    """The year person ``i`` files for Social Security (the year before the
+    plan for a benefit already being paid or SSDI)."""
+    ss = plan.people[i].social_security
+    if ss.current_benefit is not None or ss.ssdi:
+        return plan.start_year - 1
+    return plan.profile.people[i].birth_year + int(ss.claim_age)
+
+
+@dataclass(frozen=True)
+class SpousalTopUp:
+    """The spousal top-up person ``i`` gets on top of their own benefit."""
+
+    amount: float  # yearly, plan-start-year dollars, once it is paid for a full year (0 = none)
+    start_year: int | None  # first year paid; None if it never starts
+    age: int | None  # their age that year
+    spouse: str  # the other person's name
+    waits_for_spouse: bool  # they file before the spouse, so it waits for the spouse's claim
+    spouse_claim_year: int
+    reason: str = ""  # why there is none
+
+
+def spousal_topup(plan: Plan, i: int) -> SpousalTopUp | None:
+    """Half the other person's full benefit, less person ``i``'s own, reduced
+    for starting before full retirement age (no delayed credits). It starts
+    once both have filed. None for a single person."""
+    people = plan.profile.people
+    if len(people) != 2 or len(plan.people) < 2:
+        return None
+    j = 1 - i
+    own = plan.people[i].social_security.fra_benefit
+    other = plan.people[j].social_security.fra_benefit
+    claim_i, claim_j = ss_claim_year(plan, i), ss_claim_year(plan, j)
+    waits = claim_j > claim_i
+    excess = max(0.0, 0.5 * other - own)
+    name = people[j].name
+    if excess <= 0:
+        why = f"No Social Security for {name}" if other <= 0 else \
+            f"own benefit is at least half of {name}'s"
+        return SpousalTopUp(0.0, None, None, name, False, claim_j, why)
+    start = max(claim_i, claim_j)
+    if start > min(plan.death_year(i), plan.death_year(j)):
+        return SpousalTopUp(0.0, None, None, name, waits, claim_j,
+                            "one of you dies before both have filed")
+    age = start - people[i].birth_year
+    amount = excess * ssa.spousal_factor(people[i].birth_year, age)
+    shown = max(start, plan.start_year)
+    return SpousalTopUp(amount, shown, shown - people[i].birth_year, name, waits, claim_j)
+
+
 class PlanEngine:
     def __init__(self, plan: Plan, library: TaxLawLibrary, tables: RmdTables | None = None) -> None:
         problems = plan.validate()
@@ -197,6 +262,7 @@ class PlanEngine:
         # account gets a new 10-year deadline when the first one dies.
         self.deadlines: dict[str, int | None] = {a.id: a.deadline_year(plan.profile) for a in plan.accounts}
         self.inherited_rules = {a.id: a.inherited_rule(plan.profile) for a in plan.accounts}
+        self._taken_before: dict[str, float] = {}
 
     # -- people ----------------------------------------------------------
     def alive(self, i: int, year: int) -> bool:
@@ -259,11 +325,7 @@ class PlanEngine:
         return paid
 
     def _ss_claim_year(self, i: int) -> int:
-        p = self.profile.people[i]
-        ss = self.plan.people[i].social_security
-        if ss.current_benefit is not None or ss.ssdi:
-            return self.plan.start_year - 1
-        return p.birth_year + int(ss.claim_age)
+        return ss_claim_year(self.plan, i)
 
     def social_security(self, year: int) -> dict[int, float]:
         out: dict[int, float] = {}
@@ -500,6 +562,10 @@ class PlanEngine:
             y = _Year()
             sources: list[Source] = []
             withdrawn: dict[str, float] = {a.id: 0.0 for a in accounts}
+            rmds: dict[str, float] = {}
+            # A first-year RMD already out of the entered balance: income
+            # this year, but not taken from the balance again.
+            self._taken_before: dict[str, float] = {}
             notes: list[str] = notes_next
 
             def take_from(acct: Account, amount: float, category: str, label: str) -> float:
@@ -521,7 +587,17 @@ class PlanEngine:
                 if req > 0:
                     cat = "inherited" if a.kind == "inherited_ira" else "rmd"
                     what = "required withdrawal" if a.kind == "inherited_ira" else "RMD"
-                    take_from(a, req, cat, f"{labels[a.id]} {what}")
+                    if year == plan.start_year and plan.rmd_taken_now(a) and req < bal[a.id] - 0.005:
+                        # The entered balance B is after the RMD, so last year's
+                        # end balance was B + R with R = (B + R) / period, which
+                        # is R = req * B / (B - req) for req = B / period.
+                        taken = req * bal[a.id] / (bal[a.id] - req)
+                        y.add("ira", a.owner if a.owner is not None else living[0], taken)
+                        sources.append(Source(cat, f"{cat}:{a.id}", f"{labels[a.id]} {what} (already taken)", taken))
+                        self._taken_before[a.id] = taken
+                        rmds[a.id] = taken
+                        continue
+                    rmds[a.id] = take_from(a, req, cat, f"{labels[a.id]} {what}")
                     if self.deadlines.get(a.id) == year:
                         notes.append(f"{labels[a.id]}: deadline year, remaining balance withdrawn")
 
@@ -681,6 +757,14 @@ class PlanEngine:
                     basis[a.id] = bal[a.id]
 
             magi_history[year] = (tax.magi_irmaa, fs)
+            converted: dict[str, float] = {}
+            for key, (_dest, amount) in conversions.items():
+                src = key.split("->", 1)[0]
+                converted[src] = converted.get(src, 0.0) + amount
+            other_out = {k: v - rmds.get(k, 0.0) - converted.get(k, 0.0) for k, v in withdrawn.items()}
+            other_out.update({k: v + self._taken_before.get(k, 0.0) for k, v in other_out.items()
+                              if k in self._taken_before})
+            marginal = (compute_tax(prof, law, self.state_law, extra=1000.0).total_tax - tax.total_tax) / 1000.0
             yr = YearResult(
                 year=year,
                 ages={i: profile.people[i].age_in(year) for i in living},
@@ -695,6 +779,12 @@ class PlanEngine:
                 spending=spending,
                 shortfall=shortfall,
                 notes=notes,
+                rmds={k: v for k, v in rmds.items() if v > 0.005},
+                conversions={k: v for k, v in converted.items() if v > 0.005},
+                withdrawals={k: v for k, v in other_out.items() if v > 0.005},
+                net_cash_flow=net,
+                marginal_rate=marginal,
+                gains_by_rate=_gains_by_rate(tax, law, fs),
             )
             if with_lines:
                 yr.lines = self.threshold_lines(yr, prof, law, result.line_labels)
@@ -720,7 +810,7 @@ class PlanEngine:
         # A withdrawal rule's amount is the year's total from that account, so
         # an RMD already taken counts toward it (RMDs are a floor, not extra).
         # Conversions come on top of any RMD, which cannot be converted.
-        already = withdrawn[acct.id] if r.kind == "withdrawal" else 0.0
+        already = withdrawn[acct.id] + self._taken_before.get(acct.id, 0.0) if r.kind == "withdrawal" else 0.0
         if r.mode == "fixed":
             amount = r.fixed_amount(self.plan, year) - already
         elif r.mode == "spread":
@@ -879,6 +969,23 @@ class PlanEngine:
         return out
 
 
+def _gains_by_rate(tax: TaxResult, law: FederalLaw, fs: str) -> dict[float, float]:
+    """Qualified dividends and long-term gains by the federal rate they are
+    taxed at. They stack on top of ordinary taxable income; any part under
+    the deductions is untaxed and counts as 0%."""
+    brackets = law.capital_gains[status_key(fs)].brackets
+    lo, hi = tax.taxable_income - tax.preferential_income, tax.taxable_income
+    out: dict[float, float] = {}
+    for k, (bottom, rate) in enumerate(brackets):
+        top = brackets[k + 1][0] if k + 1 < len(brackets) else math.inf
+        out[rate] = out.get(rate, 0.0) + max(0.0, min(hi, top) - max(lo, bottom))
+    sheltered = max(0.0, tax.qualified_dividends + tax.net_ltcg - tax.preferential_income)
+    if brackets:
+        first = brackets[0][1]
+        out[first] = out.get(first, 0.0) + sheltered
+    return out
+
+
 def _spending_source(a: Account) -> str | None:
     """The spending-order type an account belongs to."""
     if a.kind in ("cash", "taxable", "hsa"):
@@ -955,25 +1062,177 @@ def default_line_visibility(result: PlanResult) -> dict[str, bool]:
 # -- text table ------------------------------------------------------------------
 
 
-def year_table(result: PlanResult, *, todays_dollars: bool = False) -> tuple[list[str], list[list[str]]]:
-    """The plan as rows of text: for the data table tab, CSV export and screen readers."""
+@dataclass(frozen=True)
+class TableColumn:
+    key: str
+    label: str  # in the Columns menu
+    default: bool  # shown unless the user picks otherwise
+    tip: str = ""
+
+
+# Year table columns, in table order. Year is always shown first. Some keys
+# stand for a group: one column per income type (or source), per account,
+# or per capital gains rate.
+TABLE_COLUMNS: tuple[TableColumn, ...] = (
+    TableColumn("ages", "Ages", True),
+    TableColumn("filing", "Filing status", True),
+    TableColumn("income", "Income by type", True,
+                "One column per income type, or per source with\n\"Show each source separately\""),
+    TableColumn("total_income", "Total income", True),
+    TableColumn("agi", "AGI", True),
+    TableColumn("taxable_income", "Taxable income", True),
+    TableColumn("irmaa_magi", "IRMAA MAGI", True,
+                "AGI plus tax-exempt interest;\nsets Medicare premiums two years later"),
+    TableColumn("gains_by_rate", "Gains and qualified dividends by rate (0% / 15% / 20%)", False,
+                "Qualified dividends and long-term gains by the federal rate\n"
+                "they are taxed at; any under the deductions count as 0%"),
+    TableColumn("marginal_rate", "Marginal rate on the next $1,000", False,
+                "Federal and state tax on $1,000 more ordinary income\n"
+                "(an IRA withdrawal or Roth conversion), as a rate. Shows the\n"
+                "years where Social Security or the gains \"bump zone\" raise it."),
+    TableColumn("federal_tax", "Federal tax", True),
+    TableColumn("state_tax", "State tax", True),
+    TableColumn("irmaa", "IRMAA surcharge", True),
+    TableColumn("total_tax", "Total tax", False, "Federal and state tax plus IRMAA surcharges"),
+    TableColumn("spending", "Spending", True, "The year's spending (Assumptions), grown with inflation"),
+    TableColumn("net_cash_flow", "Net cash flow", True,
+                "Income, Social Security and withdrawals by rule,\n"
+                "less spending, tax and IRMAA.\n"
+                "A surplus is saved; a deficit is taken from the accounts\n"
+                "in the spending order."),
+    TableColumn("shortfall", "Shortfall", False, "Spending and tax the spending order could not cover"),
+    TableColumn("rmds", "RMDs by account", False,
+                "RMDs and required inherited IRA withdrawals,\none column per account"),
+    TableColumn("conversions", "Roth conversions by account", False, "One column per account converted from"),
+    TableColumn("withdrawals", "Other withdrawals by account", False,
+                "Withdrawal rules, and sales or withdrawals that pay for spending,\n"
+                "one column per account"),
+    TableColumn("balances", "Balances by account", False, "Each account's balance at the end of the year"),
+    TableColumn("total_balances", "Total balances", True, "All accounts at the end of the year"),
+    TableColumn("notes", "Notes", True),
+)
+TABLE_COLUMN_KEYS = tuple(c.key for c in TABLE_COLUMNS)
+DEFAULT_TABLE_COLUMNS = tuple(c.key for c in TABLE_COLUMNS if c.default)
+
+
+@dataclass
+class TableData:
+    header: list[str]
+    tips: list[str]
+    numeric: list[bool]  # right-aligned
+    rows: list[list[str]]
+
+
+def table_data(result: PlanResult, *, todays_dollars: bool = False, columns: list[str] | tuple[str, ...] | None = None,
+               detail: bool = False) -> TableData:
+    """The year table: Year, then the chosen columns (by default the
+    suggested set) in table order. With ``detail`` the income columns are
+    one per source instead of one per type."""
+    chosen = set(columns or DEFAULT_TABLE_COLUMNS)
     people = result.plan.profile.people
-    cats = [c for c in CATEGORIES if any(yr.category_totals()[c] for yr in result.years)]
-    header = ["Year", "Ages", "Filing"] + [CATEGORY_LABELS[c] for c in cats] + [
-        "Total income", "AGI", "Taxable income", "IRMAA MAGI", "Federal tax", "State tax",
-        "IRMAA surcharge", "Total balances", "Notes",
-    ]
+    # Accounts by the names they start with (the run renames the ones a survivor inherits).
+    names = dict(result.account_labels)
+    names.update({a.id: a.label(result.plan.profile) for a in result.plan.accounts})
+    years = result.years
+    cols: list[tuple[str, str, bool, object]] = [("Year", "", False, lambda yr: str(yr.year))]
+
+    def money_col(label: str, tip: str, fn) -> None:
+        cols.append((label, tip, True, fn))
+
+    def account_ids(attr: str) -> list[str]:
+        seen: list[str] = []
+        for yr in years:
+            for k in getattr(yr, attr):
+                if k not in seen:
+                    seen.append(k)
+        order = list(result.account_labels)
+        return sorted(seen, key=lambda k: order.index(k) if k in order else len(order))
+
+    for c in TABLE_COLUMNS:
+        if c.key not in chosen:
+            continue
+        k = c.key
+        if k == "ages":
+            cols.append(("Ages", "Age at the end of the year", False,
+                         lambda yr: ", ".join(f"{people[i].name} {a}" for i, a in yr.ages.items())))
+        elif k == "filing":
+            cols.append(("Filing", "", False, lambda yr: yr.filing_status.upper()))
+        elif k == "income":
+            if detail:
+                keys: dict[str, str] = {}
+                for yr in years:
+                    for src in yr.sources:
+                        keys.setdefault(f"{src.category}|{src.key}", src.label)
+                order = {cat: n for n, cat in enumerate(CATEGORIES)}
+                for kk in sorted(keys, key=lambda x: order.get(x.split("|")[0], 99)):
+                    cat, key = kk.split("|", 1)
+                    money_col(keys[kk], CATEGORY_LABELS.get(cat, ""),
+                              lambda yr, cat=cat, key=key: sum(s.amount for s in yr.sources
+                                                               if s.category == cat and s.key == key))
+            else:
+                for cat in CATEGORIES:
+                    if any(yr.category_totals()[cat] for yr in years):
+                        money_col(CATEGORY_LABELS[cat], "", lambda yr, cat=cat: yr.category_totals()[cat])
+        elif k == "total_income":
+            money_col("Total income", "", lambda yr: yr.total_income)
+        elif k == "agi":
+            money_col("AGI", "Adjusted gross income", lambda yr: yr.tax.agi)
+        elif k == "taxable_income":
+            money_col("Taxable income", "", lambda yr: yr.tax.taxable_income)
+        elif k == "irmaa_magi":
+            money_col("IRMAA MAGI", c.tip, lambda yr: yr.tax.magi_irmaa)
+        elif k == "gains_by_rate":
+            rates = sorted({r for yr in years for r in yr.gains_by_rate})
+            for r in rates:
+                money_col(f"Gains taxed at {r:.0%}", c.tip, lambda yr, r=r: yr.gains_by_rate.get(r, 0.0))
+        elif k == "marginal_rate":
+            cols.append(("Marginal rate", c.tip, True, lambda yr: f"{100 * yr.marginal_rate:.1f}%"))
+        elif k == "federal_tax":
+            money_col("Federal tax", "", lambda yr: yr.tax.federal_tax)
+        elif k == "state_tax":
+            money_col("State tax", "", lambda yr: yr.tax.state_tax)
+        elif k == "irmaa":
+            money_col("IRMAA surcharge", "Medicare Part B and D surcharges paid this year", lambda yr: yr.irmaa_surcharge)
+        elif k == "total_tax":
+            money_col("Total tax", c.tip, lambda yr: yr.tax.total_tax + yr.irmaa_surcharge)
+        elif k == "spending":
+            money_col("Spending", c.tip, lambda yr: yr.spending)
+        elif k == "net_cash_flow":
+            money_col("Net cash flow", c.tip, lambda yr: yr.net_cash_flow)
+        elif k == "shortfall":
+            money_col("Shortfall", c.tip, lambda yr: yr.shortfall)
+        elif k in ("rmds", "conversions", "withdrawals", "balances"):
+            attr = "balances_end" if k == "balances" else k
+            word = {"rmds": "RMD", "conversions": "conversion", "withdrawals": "withdrawals",
+                    "balances": "balance"}[k]
+            ids = account_ids(attr)
+            if k == "balances":
+                ids = [i for i in ids if any(yr.balances_end.get(i, 0) > 0.5 or yr.balances_start.get(i, 0) > 0.5
+                                             for yr in years)]
+            for acct in ids:
+                money_col(f"{names.get(acct, acct)} {word}", c.tip,
+                          lambda yr, attr=attr, acct=acct: getattr(yr, attr).get(acct, 0.0))
+        elif k == "total_balances":
+            money_col("Total balances", c.tip, lambda yr: sum(yr.balances_end.values()))
+        elif k == "notes":
+            cols.append(("Notes", "", False, lambda yr: "; ".join(yr.notes)))
+
     rows = []
-    for yr in result.years:
+    for yr in years:
         f = 1 / result.deflator(yr.year) if todays_dollars else 1.0
-        money = lambda v: f"{v * f:,.0f}"  # noqa: E731
-        ct = yr.category_totals()
-        ages = ", ".join(f"{people[i].name} {a}" for i, a in yr.ages.items())
-        rows.append(
-            [str(yr.year), ages, yr.filing_status.upper()]
-            + [money(ct[c]) for c in cats]
-            + [money(yr.total_income), money(yr.tax.agi), money(yr.tax.taxable_income), money(yr.tax.magi_irmaa),
-               money(yr.tax.federal_tax), money(yr.tax.state_tax), money(yr.irmaa_surcharge),
-               money(sum(yr.balances_end.values())), "; ".join(yr.notes)]
-        )
-    return header, rows
+        row = []
+        for _label, _tip, numeric, fn in cols:
+            v = fn(yr)
+            if isinstance(v, str):
+                row.append(v)
+            else:
+                row.append(f"{round(v * f):,}")
+        rows.append(row)
+    return TableData([c[0] for c in cols], [c[1] for c in cols], [c[2] for c in cols], rows)
+
+
+def year_table(result: PlanResult, *, todays_dollars: bool = False, columns: list[str] | tuple[str, ...] | None = None,
+               detail: bool = False) -> tuple[list[str], list[list[str]]]:
+    """The plan as rows of text: for the data table tab, CSV export and screen readers."""
+    t = table_data(result, todays_dollars=todays_dollars, columns=columns, detail=detail)
+    return t.header, t.rows

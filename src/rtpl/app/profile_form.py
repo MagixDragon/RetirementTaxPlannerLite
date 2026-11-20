@@ -110,13 +110,14 @@ class PersonBox(QGroupBox):
         form.addRow(birth_label, self.birth_year)
         form.addRow("", self.age)
         _add_row(form, "Life expectancy", self.life,
-                 "Age at death in the forward plan; the survivor files single after, and the plan ends "
-                 "when the last person dies. Each plan keeps its own copy. Not used by the marginal graph.")
+                 "Age at death in the forward plan; the survivor files single after,\n"
+                 "and the plan ends when the last person dies. Each plan keeps its\n"
+                 "own copy. Not used by the marginal graph.")
         _add_row(
             form,
             "Medicare Part B",
             self.medicare,
-            "Choose Yes for Medicare before 65 (for example on SSDI), so IRMAA applies.",
+            "Choose Yes for Medicare before 65 (for example on SSDI),\nso IRMAA applies.",
         )
         form.addRow("", self.blind)
         self.money: dict[str, DoubleSpinBox] = {}
@@ -199,8 +200,9 @@ class ProfileForm(QWidget):
             form,
             "Inflation rate",
             self.inflation,
-            "Yearly inflation used to project tax law for years with no data yet, "
-            "such as the IRMAA brackets two years ahead. The forward plan uses it too.",
+            "Yearly inflation used to project tax law for years with no data\n"
+            "yet, such as the IRMAA brackets two years ahead. The forward plan\n"
+            "uses it too.",
         )
         outer.addWidget(basics)
 

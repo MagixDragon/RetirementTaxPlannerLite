@@ -8,28 +8,40 @@ the last change did to lifetime tax and final balances.
 
 from __future__ import annotations
 
+import textwrap
 from html import escape
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
+from rtpl.app import TIP_WIDTH
 from rtpl.charts.forward_chart import line_short_label, render_balances, render_income
-from rtpl.engine.forward import PlanResult, default_line_visibility, run_plan, year_table
+from rtpl.engine.forward import (
+    DEFAULT_TABLE_COLUMNS,
+    TABLE_COLUMNS,
+    PlanResult,
+    default_line_visibility,
+    run_plan,
+    table_data,
+)
 from rtpl.model.plan import Plan
 from rtpl.model.profile import Profile
 from rtpl.taxlaw.loader import TaxLawLibrary
@@ -38,6 +50,7 @@ from rtpl.theme import Palette
 
 class PlanView(QWidget):
     status = Signal(str)
+    columns_changed = Signal()  # the user picked year table columns (saved in the plan)
 
     def __init__(self, library: TaxLawLibrary) -> None:
         super().__init__()
@@ -97,15 +110,48 @@ class PlanView(QWidget):
         self.bal_canvas = FigureCanvasQTAgg(self.bal_fig)
         self.bal_canvas.setAccessibleName("Account balances chart")
         self.tabs.addTab(self.bal_canvas, "&Balances")
+        table_page = QWidget()
+        tlay = QVBoxLayout(table_page)
+        tlay.setContentsMargins(0, 4, 0, 0)
+        bar = QHBoxLayout()
+        self.columns_button = QPushButton("C&olumns…")
+        self.columns_button.setToolTip("Choose the year table's columns\n(also on the column headers' right-click menu)")
+        self.columns_menu = QMenu(self)
+        self.columns_menu.setToolTipsVisible(True)
+        self.column_actions: dict[str, QAction] = {}
+        for col in TABLE_COLUMNS:
+            act = QAction(col.label, self.columns_menu)
+            act.setCheckable(True)
+            if col.tip:
+                act.setToolTip(col.tip)
+            act.toggled.connect(self._columns_picked)
+            self.columns_menu.addAction(act)
+            self.column_actions[col.key] = act
+        self.columns_menu.addSeparator()
+        self.columns_menu.addAction("&Reset to suggested columns", self._reset_columns)
+        self.columns_button.setMenu(self.columns_menu)
+        bar.addWidget(self.columns_button)
+        bar.addStretch(1)
+        tlay.addLayout(bar)
         self.table = QTableWidget(0, 0)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAccessibleName("Year by year plan table")
-        self.tabs.addTab(self.table, "&Year table")
+        header = self.table.horizontalHeader()
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(
+            lambda pos: self.columns_menu.exec(header.mapToGlobal(pos)))
+        # Qt leaves a tooltip up when the mouse moves on to a header or cell
+        # without one; hide it instead.
+        header.viewport().installEventFilter(self)
+        self.table.viewport().installEventFilter(self)
+        tlay.addWidget(self.table, 1)
+        self.tabs.addTab(table_page, "&Year table")
         lay.addWidget(self.tabs, 1)
 
     # -- data ------------------------------------------------------------
     def set_plan(self, plan: Plan | None) -> None:
         self.plan = plan
+        self._sync_column_actions()
         self.overrides.clear()
         self.last_totals = None
         self.last_change = ""
@@ -221,6 +267,38 @@ class PlanView(QWidget):
         self.overrides.clear()
         self.redraw()
 
+    # -- year table columns --------------------------------------------
+    def table_columns(self) -> list[str]:
+        """The plan's chosen columns, or the suggested set."""
+        known = [c.key for c in TABLE_COLUMNS]
+        picked = [k for k in (self.plan.table_columns if self.plan else []) if k in known]
+        return picked or list(DEFAULT_TABLE_COLUMNS)
+
+    def _sync_column_actions(self) -> None:
+        chosen = set(self.table_columns())
+        for key, act in self.column_actions.items():
+            act.blockSignals(True)
+            act.setChecked(key in chosen)
+            act.blockSignals(False)
+
+    def set_table_columns(self, keys: list[str]) -> None:
+        """Pick the year table's columns (an empty list means the suggested set)."""
+        if self.plan is None:
+            return
+        order = [c.key for c in TABLE_COLUMNS]
+        keys = [k for k in order if k in set(keys)]
+        self.plan.table_columns = [] if keys == list(DEFAULT_TABLE_COLUMNS) else keys
+        self._sync_column_actions()
+        self.redraw()
+        self.columns_changed.emit()
+
+    def _columns_picked(self, *_args) -> None:
+        keys = [k for k, act in self.column_actions.items() if act.isChecked()]
+        self.set_table_columns(keys or list(DEFAULT_TABLE_COLUMNS))
+
+    def _reset_columns(self) -> None:
+        self.set_table_columns([])
+
     # -- drawing ---------------------------------------------------------
     def set_palette(self, palette: Palette) -> None:
         self.palette = palette
@@ -241,17 +319,48 @@ class PlanView(QWidget):
         self.income_canvas.draw_idle()
         render_balances(self.bal_fig, self.result, self.palette, **kw)
         self.bal_canvas.draw_idle()
-        header, rows = year_table(self.result, todays_dollars=self.todays.isChecked())
-        self.table.setColumnCount(len(header))
-        self.table.setHorizontalHeaderLabels(header)
-        self.table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
+        data = table_data(self.result, todays_dollars=self.todays.isChecked(), columns=self.table_columns(),
+                          detail=self.detail.isChecked())
+        self.table.clear()
+        self.table.setColumnCount(len(data.header))
+        for c, (label, tip) in enumerate(zip(data.header, data.tips)):
+            head = QTableWidgetItem(label)
+            # Every header gets a tooltip: its explanation, or else its full
+            # name (which a narrow column may cut off).
+            name = textwrap.fill(label, TIP_WIDTH)
+            head.setToolTip(tip or name)
+            self.table.setHorizontalHeaderItem(c, head)
+        self.table.setRowCount(len(data.rows))
+        for r, row in enumerate(data.rows):
             for c, text in enumerate(row):
                 item = QTableWidgetItem(text)
-                if 2 < c < len(row) - 1:
+                if data.numeric[c]:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                if text.startswith("-") and data.header[c] in ("Net cash flow",):
+                    item.setForeground(QColor("#ff8a80" if QColor(self.palette.surface).lightness() < 128
+                                              else "#b42318"))
                 self.table.setItem(r, c, item)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+    def table_export(self):
+        """The year table as shown (columns, today's dollars, each source), for export."""
+        assert self.result is not None
+        return table_data(self.result, todays_dollars=self.todays.isChecked(), columns=self.table_columns(),
+                          detail=self.detail.isChecked())
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            header = self.table.horizontalHeader()
+            if obj is header.viewport():
+                item = self.table.horizontalHeaderItem(header.logicalIndexAt(event.pos()))
+            elif obj is self.table.viewport():
+                item = self.table.itemAt(event.pos())
+            else:
+                return super().eventFilter(obj, event)
+            if item is None or not item.toolTip():
+                QToolTip.hideText()
+                return True
+        return super().eventFilter(obj, event)
 
     def current_figure(self) -> Figure:
         return self.bal_fig if self.tabs.currentIndex() == 1 else self.income_fig

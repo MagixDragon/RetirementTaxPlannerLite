@@ -11,6 +11,7 @@ deleting it, for quick what-ifs.
 from __future__ import annotations
 
 import copy
+import textwrap
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
@@ -37,8 +38,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from rtpl.app import TIP_WIDTH
 from rtpl.app.inputs import ComboBox, DoubleSpinBox, SpinBox
 from rtpl.app.profile_form import compact_form, money_box
+from rtpl.engine.forward import spousal_topup
+from rtpl.engine.rmd import rmd_start_age
 from rtpl.engine.social_security import full_retirement_age
 from rtpl.model.plan import (
     ACCOUNT_KINDS,
@@ -180,10 +184,11 @@ def percent_box(lo: float = 0.0, hi: float = 100.0, step: float = 0.1, decimals:
     return box
 
 
-NOMINAL_TIP = ("Nominal, before inflation: for example about 10% a year for US stocks over the long run, "
-               "not the 7% left after inflation")
-YIELD_TIP = ("A percentage of the whole account balance, paid each year and taxed then. Not the sweep or "
-             "money market rate: $350 of interest on a $2,000,000 account is 0.0175%. Up to four decimals.")
+NOMINAL_TIP = ("Nominal, before inflation: for example about 10% a year for US\n"
+               "stocks over the long run, not the 7% left after inflation")
+YIELD_TIP = ("A percentage of the whole account balance, paid each year and taxed\n"
+             "then. Not the sweep or money market rate: $350 of interest on a\n"
+             "$2,000,000 account is 0.0175%. Up to four decimals.")
 
 
 def age_text(age: float) -> str:
@@ -676,15 +681,19 @@ class AccountForm(ItemForm):
         self.orig_birth.setRange(1880, 2100)
         self.started = self.row("RMDs", QCheckBox("The original owner had started RMDs"))
         self.beneficiary = self.row("Who inherited it", ComboBox(),
-                                    "The owner of this account in the plan, as the original owner's beneficiary")
+                                    "The owner of this account in the plan,\nas the original owner's beneficiary")
         for k, label in BENEFICIARY_KINDS.items():
             self.beneficiary.addItem(label, k)
+        self.rmd_taken = self.row("This year's RMD", QCheckBox("Already taken (out of the balance above)"),
+                                  "For a plan started mid-year: the plan still counts the RMD as\n"
+                                  "this year's income, but doesn't take it from the balance again.\n"
+                                  "Applies only while this year is the plan's first year.")
         self.deadline = self.note_row("Withdrawals")
         self.deadline.setWordWrap(True)
         self.deadline.setMinimumWidth(220)
         self.watch(self.name, self.kind, self.owner, self.balance, self.own_return, self.return_rate, self.basis,
                    self.interest, self.qdiv, self.nqdiv, self.capdist, self.spouse_bene, self.inherited_year,
-                   self.orig_birth, self.started, self.beneficiary)
+                   self.orig_birth, self.started, self.beneficiary, self.rmd_taken)
 
     def fill(self) -> None:
         a: Account = self.obj
@@ -705,6 +714,8 @@ class AccountForm(ItemForm):
         self.orig_birth.setValue(a.original_owner_birth_year or 1945)
         self.started.setChecked(a.owner_started_rmds)
         self.beneficiary.setCurrentIndex(max(0, self.beneficiary.findData(a.beneficiary)))
+        self.rmd_taken.setChecked(self.plan.rmd_taken_now(a))
+        self.rmd_taken.setText(f"Already taken for {self.plan.start_year} (out of the balance above)")
 
     def store(self) -> None:
         a: Account = self.obj
@@ -731,6 +742,7 @@ class AccountForm(ItemForm):
             a.original_owner_birth_year = self.orig_birth.value()
         a.owner_started_rmds = self.started.isChecked()
         a.beneficiary = self.beneficiary.currentData()
+        a.rmd_taken_year = self.plan.start_year if self.rmd_taken.isChecked() else None
 
     def update_rows(self) -> None:
         kind = self.kind.currentData()
@@ -746,15 +758,35 @@ class AccountForm(ItemForm):
         self.show_row(self.cash_note, cash)
         if cash and self.plan is not None:
             self.cash_note.setText(f"The plan's Cash return: {100 * self.plan.assumptions.cash_return:.2f}%")
-            self.cash_note.setToolTip("Every Cash / savings account earns the plan's Cash return, taxed as "
-                                      "interest. Change it in Assumptions.")
+            self.cash_note.setToolTip("Every Cash / savings account earns the plan's Cash return,\n"
+                                      "taxed as interest. Change it in Assumptions.")
         self.show_row(self.spouse_bene, kind in TRADITIONAL_KINDS)
+        self.show_row(self.rmd_taken, self._rmd_due())
         inherited = kind == "inherited_ira"
         for w in (self.inherited_year, self.orig_birth, self.started, self.beneficiary, self.deadline):
             self.show_row(w, inherited)
         if inherited and self.plan is not None and self.obj is not None:
             rule = self.obj.inherited_rule(self.plan.profile)
             self.deadline.setText(rule.text if rule else "")
+
+
+    def _rmd_due(self) -> bool:
+        """Whether this account has an RMD in the plan's first year (so it may already be taken)."""
+        a = self.obj
+        if self.plan is None or a is None:
+            return False
+        if a.rmd_taken_year == self.plan.start_year:
+            return True  # keep the box visible while it is ticked
+        y0 = self.plan.start_year
+        if a.kind in TRADITIONAL_KINDS:
+            if a.owner is None or a.owner >= len(self.plan.profile.people):
+                return False
+            owner = self.plan.profile.people[a.owner]
+            return owner.age_in(y0) >= rmd_start_age(owner.birth_year)
+        if a.kind == "inherited_ira" and a.inherited_year is not None:
+            rule = a.inherited_rule(self.plan.profile)
+            return bool(rule and rule.annual_rmds and a.inherited_year < y0)
+        return False
 
 
 class IncomeForm(ItemForm):
@@ -825,11 +857,18 @@ class IncomeForm(ItemForm):
             self.end.set_min_year(start.resolve(self.plan.profile, start=True) if start else None)
 
 
+SPOUSAL_TIP = (
+    "The plan adds a spousal top-up on its own: half the other person's\n"
+    "benefit at full retirement age, less this person's own. It starts\n"
+    "once both have filed, is reduced for starting before full retirement\n"
+    "age, and gets no delayed credits after it. Either person can get it.")
+
+
 class PersonForm(ItemForm):
     def __init__(self) -> None:
         super().__init__()
         self.fra = self.row("Benefit at full retirement age", money_box(),
-                            "Yearly benefit at full retirement age, in today's dollars (from your SSA statement)")
+                            "Yearly benefit at full retirement age, in today's dollars\n(from your SSA statement)")
         # Clergy and some government workers have no benefit of their own.
         self.fra.setSpecialValueText("No Social Security")
         self.fra.setMaximumWidth(170)
@@ -839,6 +878,11 @@ class PersonForm(ItemForm):
         self.current = self.row("Yearly benefit now", money_box())
         self.ssdi = self.row("Disability", QCheckBox("Receiving SSDI"))
         self.ssdi_end = self.row("SSDI ends at age", OptionalField("At full retirement age", AgeEdit(17, 67)))
+        self.spousal = self.note_row("Spousal top-up")
+        self.spousal.setWordWrap(True)
+        self.spousal.setMinimumWidth(220)
+        self.spousal.setToolTip(SPOUSAL_TIP)
+        self.spousal_hint = self.hint_row()
         self.cola_note = self.info_row("Social Security COLA")
         self.life_note = self.info_row("Life expectancy")
         self.watch(self.fra, self.claim, self.claimed, self.current, self.ssdi, self.ssdi_end)
@@ -878,6 +922,33 @@ class PersonForm(ItemForm):
         claimed = self.claimed.isChecked()
         self.show_row(self.current, claimed)
         self.show_row(self.ssdi_end, self.ssdi.isChecked())
+        self._show_spousal()
+
+    def _show_spousal(self) -> None:
+        """The spousal top-up the plan adds, so it is visible, not hidden in the engine."""
+        top = None
+        if self.plan is not None and self.obj is not None:
+            top = spousal_topup(self.plan, self.plan.people.index(self.obj))
+        self.show_row(self.spousal, top is not None)
+        self.show_row(self.spousal_hint, top is not None)
+        if top is None:
+            return
+        i = self.plan.people.index(self.obj)
+        name = self.plan.profile.people[i].name
+        own = self.obj.social_security.fra_benefit
+        if top.amount <= 0:
+            self.spousal.setText(f"None ({top.reason})")
+        else:
+            self.spousal.setText(f"${top.amount:,.0f} a year from {top.start_year} (age {top.age}), "
+                                 "in today's dollars")
+        hints = []
+        if top.amount > 0 and own <= 0:
+            hints.append(f"With no benefit of their own, {name} gets the spousal benefit only.")
+        if top.amount > 0 and top.waits_for_spouse:
+            hints.append(f"{name} files before {top.spouse}, so the top-up waits until {top.spouse} files "
+                         f"in {top.spouse_claim_year}.")
+        hints.append("Either of you can get a top-up: half the other's full benefit, less your own.")
+        self.spousal_hint.setText(" ".join(hints))
 
 
 class RuleForm(ItemForm):
@@ -895,8 +966,9 @@ class RuleForm(ItemForm):
             self.mode.addItem(label, k)
         self.amount = self.row("Each year", money_box())
         self.growth = self.row("Yearly increase", ComboBox(),
-                               "Inflation: the amount is in today's dollars and grows with inflation. Fixed %: "
-                               "the amount is the first year's and grows by this rate each year after.")
+                               "Inflation: the amount is in today's dollars and grows with inflation.\n"
+                               "Fixed %: the amount is the first year's and grows by this rate\n"
+                               "each year after.")
         for k, label in RULE_GROWTH_KINDS.items():
             self.growth.addItem(label, k)
         self.growth_rate = self.row("Increase rate", percent_box(-20, 20), "Negative for a falling amount")
@@ -977,8 +1049,8 @@ class RuleForm(ItemForm):
         self.show_row(self.deadline, deadline is not None)
         if deadline is not None:
             self.deadline.setText(f"10-year rule: ends by {deadline} at the latest")
-            self.deadline.setToolTip(f"The inherited IRA must be empty by the end of {deadline}, so the rule "
-                                     "can't run past it and 1/N counts the years to then.")
+            self.deadline.setToolTip(f"The inherited IRA must be empty by the end of {deadline},\n"
+                                     "so the rule can't run past it and 1/N counts the years to then.")
         self.show_row(self.to_account, self.kind.currentData() == "roth_conversion")
         self.show_row(self.amount, mode == "fixed")
         self.show_row(self.growth, mode == "fixed")
@@ -993,19 +1065,21 @@ class AssumptionsForm(ItemForm):
         self.inflation = self.info_row("Inflation")
         self.cola = self.row("Social Security COLA", OptionalField("Same as inflation", percent_box(-1, 15)))
         self.ret = self.row("Default return (nominal)", percent_box(-20, 30),
-                            "For accounts without a return of their own. " + NOMINAL_TIP)
+                            "For accounts without a return of their own.\n" + NOMINAL_TIP)
         self.cash = self.row("Cash return (nominal)", percent_box(-5, 20),
-                             "What every Cash / savings account earns, taxed as interest. Nominal, before inflation")
+                             "What every Cash / savings account earns, taxed as interest.\nNominal, before inflation")
         self.spending = self.row("Yearly spending", money_box(), "In today's dollars; grows with inflation")
         self.survivor = self.row("Spending after the first death", percent_box(0, 200, 5),
                                  "The survivor's spending, as a share of the couple's")
         self.order = self.row("Pay for spending from", SpendingOrderEdit(),
-                              "When income falls short, money comes from the ticked account types, top first "
-                              "(several accounts of one type: in list order). Unticked types are never used "
-                              "for spending; withdrawals from them need a strategy.")
-        magi_tip = ("Form 1040 line 11 (AGI) plus line 2a (tax-exempt interest). Sets Medicare premiums "
-                    "(IRMAA) two years later. Not entered: no IRMAA is charged in the plan's first year, and "
-                    "the second year uses the plan's own first-year MAGI.")
+                              "When income falls short, money comes from the ticked account\n"
+                              "types, top first (several accounts of one type: in list order).\n"
+                              "Unticked types are never used for spending; withdrawals from\n"
+                              "them need a strategy.")
+        magi_tip = ("Form 1040 line 11 (AGI) plus line 2a (tax-exempt interest).\n"
+                    "Sets Medicare premiums (IRMAA) two years later. Not entered: no\n"
+                    "IRMAA is charged in the plan's first year, and the second year\n"
+                    "uses the plan's own first-year MAGI.")
         self.magi1 = self.row("IRMAA MAGI two years before", money_box(), magi_tip)
         self.magi2 = self.row("IRMAA MAGI last year", money_box(), magi_tip)
         for box in (self.magi1, self.magi2):
@@ -1143,7 +1217,7 @@ class PlanEditor(QWidget):
         name_label = QLabel("Plan &name")
         self.name = QLineEdit()
         self.name.setPlaceholderText("e.g. Roth conversions until Social Security")
-        self.name.setToolTip("A name for this version of the plan; it is part of the suggested file name")
+        self.name.setToolTip("A name for this version of the plan;\nit is part of the suggested file name")
         self.name.setAccessibleName("Plan name")
         name_label.setBuddy(self.name)
         self.name.textEdited.connect(self._name_edited)
@@ -1309,7 +1383,12 @@ class PlanEditor(QWidget):
                     f"spending {short_money(a.spending)}")
             tip = text
         item.setText(0, text)
-        item.setToolTip(0, tip or text)
+        # Names and notes are the user's, so wrap them to the tooltip width.
+        def wrap(t: str) -> str:
+            return "\n".join(textwrap.fill(line, TIP_WIDTH) for line in t.split("\n"))
+
+        tip = wrap(tip) if tip else ""
+        item.setToolTip(0, tip or wrap(text))
         item.setData(1, BAR_ROLE, bar)
         if bar is not None:
             item.setToolTip(1, tip or f"{bar[0]}–{bar[1]}")

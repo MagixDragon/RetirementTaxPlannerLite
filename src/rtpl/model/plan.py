@@ -240,6 +240,10 @@ class Account:
     original_owner_birth_year: int | None = None
     owner_started_rmds: bool = True  # the owner died on or after their RMD start
     beneficiary: str = "other"  # who inherited it: a key of BENEFICIARY_KINDS
+    # Traditional and inherited: the year whose RMD is already out of the
+    # entered balance (a plan started mid-year). It applies only while that
+    # year is the plan's first year, so it never needs unticking.
+    rmd_taken_year: int | None = None
     enabled: bool = True  # False leaves the account (and rules on it) out, for what-ifs
 
     def label(self, profile: Profile) -> str:
@@ -419,6 +423,9 @@ class Plan:
     incomes: list[IncomeStream] = field(default_factory=list)
     rules: list[Rule] = field(default_factory=list)
     assumptions: Assumptions = field(default_factory=Assumptions)
+    # Year table columns the user picked (keys of TABLE_COLUMNS in
+    # rtpl.engine.forward); empty means the suggested set.
+    table_columns: list[str] = field(default_factory=list)
     schema_version: int = PLAN_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -476,6 +483,10 @@ class Plan:
         while f"{stem}_{n}" in used:
             n += 1
         return f"{stem}_{n}"
+
+    def rmd_taken_now(self, acct: Account) -> bool:
+        """True when the account's first-year RMD is already out of its balance."""
+        return acct.rmd_taken_year is not None and acct.rmd_taken_year == self.start_year
 
     def account(self, acct_id: str) -> Account | None:
         return next((a for a in self.accounts if a.id == acct_id), None)
@@ -561,7 +572,8 @@ class Plan:
             rules.append(Rule(**r))
         assumptions = Assumptions(**data.get("assumptions", {}))
         return cls(profile=profile, name=data.get("name", ""), people=people, accounts=accounts,
-                   incomes=incomes, rules=rules, assumptions=assumptions)
+                   incomes=incomes, rules=rules, assumptions=assumptions,
+                   table_columns=list(data.get("table_columns", [])))
 
     def save(self, path: str | Path) -> None:
         data = self.to_dict()

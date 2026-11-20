@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import textwrap
 from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -37,6 +38,8 @@ from PySide6.QtWidgets import (
 )
 
 from rtpl import __version__
+from rtpl.app import TIP_WIDTH
+from rtpl.export import write_csv, write_ods
 from rtpl.app.icon import about_pixmap
 from rtpl.app.inputs import ComboBox
 from rtpl.app.plan_editor import PlanEditor
@@ -283,6 +286,7 @@ class MainWindow(QMainWindow):
         self._plan_timer.timeout.connect(self._recompute_plan)
         self.plan_editor.changed.connect(self._plan_timer.start)
         self.plan_editor.changed.connect(self._mark_modified)
+        self.plan_view.columns_changed.connect(self._mark_modified)
         self._sync_input_tabs()
 
         self._load_profile(self._starter_profile(), None)
@@ -327,8 +331,9 @@ class MainWindow(QMainWindow):
         self.irmaa_basis.addItem("This year's published brackets", "current_year")
         self.irmaa_basis.setAccessibleName("IRMAA brackets to show")
         self.irmaa_basis.setToolTip(
-            "Income this year sets Medicare premiums two years from now, so the default "
-            "shows those brackets, projected with the profile's inflation rate."
+            "Income this year sets Medicare premiums two years from now, so the\n"
+            "default shows those brackets, projected with the profile's\n"
+            "inflation rate."
         )
         ilabel = QLabel("&IRMAA brackets")
         ilabel.setBuddy(self.irmaa_basis)
@@ -407,6 +412,8 @@ class MainWindow(QMainWindow):
     def _set_plan(self, plan: Plan | None) -> None:
         self.plan_view.set_plan(plan)
         self.plan_editor.set_plan(plan)
+        if hasattr(self, "export_table_action"):
+            self.export_table_action.setEnabled(plan is not None)
         self._sync_input_tabs()
 
     def _recompute_plan(self) -> None:
@@ -503,6 +510,11 @@ class MainWindow(QMainWindow):
         m.addAction(QAction("Save Pla&n As…", self, shortcut="Ctrl+Alt+S", triggered=self.save_plan_as))
         m.addSeparator()
         m.addAction(QAction("&Export Chart…", self, shortcut="Ctrl+E", triggered=self.export_chart))
+        self.export_table_action = QAction("Export &Year Table…", self, shortcut="Ctrl+Shift+E",
+                                           triggered=self.export_year_table)
+        self.export_table_action.setToolTip("Save the forward plan's year table as a spreadsheet (.ods)\nor CSV")
+        self.export_table_action.setEnabled(False)
+        m.addAction(self.export_table_action)
         m.addSeparator()
         m.addAction(QAction("E&xit", self, shortcut=QKeySequence.StandardKey.Quit, triggered=self.close))
 
@@ -568,12 +580,14 @@ class MainWindow(QMainWindow):
         cg_cb.setText(st.gains_label if st else "State CG & QD tax")
         cg_cb.setEnabled(st is not None and st.has_separate_gains_tax)
         cg_cb.setToolTip(
-            "Tax under the state's own capital gains rules (Washington's gains tax, "
-            "Montana's gains rates, Hawaii's gains rate cap). Where a state taxes gains "
-            "as regular income, that tax is in the State Tax layer."
+            "Tax under the state's own capital gains rules (Washington's gains\n"
+            "tax, Montana's gains rates, Hawaii's gains rate cap). Where a state\n"
+            "taxes gains as regular income, that tax is in the State Tax layer."
         )
         state_cb.setToolTip(
-            "\n".join([f"{st.name} ({st.year or ''})", *st.notes, *(f"Source: {x}" for x in st.sources)])
+            # State notes and sources come from the data files: wrap them to the tooltip width.
+            "\n".join(textwrap.fill(line, TIP_WIDTH, subsequent_indent="  ") for line in
+                      [f"{st.name} ({st.year or ''})", *st.notes, *(f"Source: {x}" for x in st.sources)])
             if st else "Choose a state in the profile to add this layer."
         )
         self.redraw()
@@ -813,6 +827,28 @@ class MainWindow(QMainWindow):
             fig = self.plan_view.current_figure() if self.pages.currentWidget() is self.plan_view else self.figure
             fig.savefig(path, dpi=200, facecolor=fig.get_facecolor())
             self.statusBar().showMessage(f"Exported {path}", 4000)
+
+    def export_year_table(self) -> None:
+        """Save the year table as shown (columns, dollars, each source) as .ods or .csv."""
+        if self.plan_view.result is None:
+            return
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export Year Table", self._suggested_plan_path(".ods"),
+            "OpenDocument spreadsheet (*.ods);;CSV (*.csv)")
+        if not path:
+            return
+        if not path.lower().endswith((".ods", ".csv")):
+            path += ".csv" if "csv" in chosen.lower() else ".ods"
+        data = self.plan_view.table_export()
+        try:
+            if path.lower().endswith(".csv"):
+                write_csv(path, data.header, data.rows)
+            else:
+                write_ods(path, data.header, data.rows, data.numeric)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export Year Table", f"Could not save {path}:\n{exc}")
+            return
+        self.statusBar().showMessage(f"Exported {path}", 4000)
 
     def about(self) -> None:
         years = ", ".join(str(y) for y in self.library.enacted_years)
