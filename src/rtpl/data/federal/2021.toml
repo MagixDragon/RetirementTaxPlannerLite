@@ -1,0 +1,82 @@
+# Federal tax law for tax year 2021 (historical). See 2025.toml for the
+# format notes.
+#
+# RMDs for 2021 used the older IRS life expectancy tables, which the
+# app does not ship yet, so forward plans that start in 2021 overstate
+# how long the money lasts slightly (RMDs come out a little small).
+
+year = 2021
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2020-45 (inflation adjustments)",
+  "CMS 2021 Medicare Parts B and D premium fact sheets",
+  "HHS 2020 poverty guidelines (used for 2021 ACA coverage)",
+]
+
+[policy]
+personal_exemption = 0.0                 # 0 under TCJA (2018-2025)
+senior_deduction = false                 # the OBBBA senior deduction starts in 2025
+# ARPA's enhanced ACA credits applied (no 400% FPL cliff).
+aca_enhanced_subsidies = true
+
+[ordinary_brackets]
+single = [[0, 0.10], [9950, 0.12], [40525, 0.22], [86375, 0.24], [164925, 0.32], [209425, 0.35], [523600, 0.37]]
+mfj    = [[0, 0.10], [19900, 0.12], [81050, 0.22], [172750, 0.24], [329850, 0.32], [418850, 0.35], [628300, 0.37]]
+mfs    = [[0, 0.10], [9950, 0.12], [40525, 0.22], [86375, 0.24], [164925, 0.32], [209425, 0.35], [314150, 0.37]]
+hoh    = [[0, 0.10], [14200, 0.12], [54200, 0.22], [86350, 0.24], [164900, 0.32], [209400, 0.35], [523600, 0.37]]
+
+[standard_deduction]
+single = 12550
+mfj    = 25100
+mfs    = 12550
+hoh    = 18800
+
+[additional_standard_deduction]
+unmarried = 1700
+married   = 1350
+
+[senior_deduction]
+# Not in effect this year (policy.senior_deduction is false and the
+# law's first year is 2025). Kept so the file has the same shape.
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+single = [[0, 0.0], [40400, 0.15], [445850, 0.20]]
+mfj    = [[0, 0.0], [80800, 0.15], [501600, 0.20]]
+mfs    = [[0, 0.0], [40400, 0.15], [250800, 0.20]]
+hoh    = [[0, 0.0], [54100, 0.15], [473750, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2021, set by MAGI from 2019.
+premium_year = 2021
+lookback_years = 2
+part_b_standard = 148.50
+tiers = [
+  { single = 88000, mfj = 176000, mfs = 88000, part_b = 207.90, part_d = 12.30 },
+  { single = 111000, mfj = 222000, mfs = 88000, part_b = 297.00, part_d = 31.80 },
+  { single = 138000, mfj = 276000, mfs = 88000, part_b = 386.10, part_d = 51.20 },
+  { single = 165000, mfj = 330000, mfs = 88000, part_b = 475.20, part_d = 70.70 },
+  { single = 500000, mfj = 750000, mfs = 412000, part_b = 504.90, part_d = 77.10 },
+]
+
+[aca]
+fpl_first_person = 12760
+fpl_each_additional = 4480
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00

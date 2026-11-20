@@ -177,7 +177,7 @@ class ProfileForm(QWidget):
         self.plan_name = QLineEdit()
         self.plan_name.setMinimumWidth(FIELD_WIDTH)
         self.year = SpinBox()
-        self.year.setRange(2025, 2100)
+        self.year.setRange(2020, 2100)  # the earliest federal data file
         self.year.setMaximumWidth(80)
         self.filing = ComboBox()
         for key, text in FILING_STATUS_LABELS.items():

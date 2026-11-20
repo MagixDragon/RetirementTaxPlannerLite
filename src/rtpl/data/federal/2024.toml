@@ -1,0 +1,81 @@
+# Federal tax law for tax year 2024 (historical). See 2025.toml for the
+# format notes.
+#
+# The marginal-graph tax math needs no code changes for this year.
+
+year = 2024
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2023-34 (inflation adjustments)",
+  "CMS 2024 Medicare Parts B and D premium fact sheets",
+  "HHS 2023 poverty guidelines (used for 2024 ACA coverage)",
+]
+
+[policy]
+personal_exemption = 0.0                 # 0 under TCJA (2018-2025)
+senior_deduction = false                 # the OBBBA senior deduction starts in 2025
+# ARPA's enhanced ACA credits applied (no 400% FPL cliff).
+aca_enhanced_subsidies = true
+
+[ordinary_brackets]
+single = [[0, 0.10], [11600, 0.12], [47150, 0.22], [100525, 0.24], [191950, 0.32], [243725, 0.35], [609350, 0.37]]
+mfj    = [[0, 0.10], [23200, 0.12], [94300, 0.22], [201050, 0.24], [383900, 0.32], [487450, 0.35], [731200, 0.37]]
+mfs    = [[0, 0.10], [11600, 0.12], [47150, 0.22], [100525, 0.24], [191950, 0.32], [243725, 0.35], [365600, 0.37]]
+hoh    = [[0, 0.10], [16550, 0.12], [63100, 0.22], [100500, 0.24], [191950, 0.32], [243700, 0.35], [609350, 0.37]]
+
+[standard_deduction]
+single = 14600
+mfj    = 29200
+mfs    = 14600
+hoh    = 21900
+
+[additional_standard_deduction]
+unmarried = 1950
+married   = 1550
+
+[senior_deduction]
+# Not in effect this year (policy.senior_deduction is false and the
+# law's first year is 2025). Kept so the file has the same shape.
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+single = [[0, 0.0], [47025, 0.15], [518900, 0.20]]
+mfj    = [[0, 0.0], [94050, 0.15], [583750, 0.20]]
+mfs    = [[0, 0.0], [47025, 0.15], [291850, 0.20]]
+hoh    = [[0, 0.0], [63000, 0.15], [551350, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2024, set by MAGI from 2022.
+premium_year = 2024
+lookback_years = 2
+part_b_standard = 174.70
+tiers = [
+  { single = 103000, mfj = 206000, mfs = 103000, part_b = 244.60, part_d = 12.90 },
+  # Tier 2 Part D: SSA lists $33.30 for joint filers and $33.50 for single.
+  { single = 129000, mfj = 258000, mfs = 103000, part_b = 349.40, part_d = 33.30 },
+  { single = 161000, mfj = 322000, mfs = 103000, part_b = 454.20, part_d = 53.80 },
+  { single = 193000, mfj = 386000, mfs = 103000, part_b = 559.00, part_d = 74.20 },
+  { single = 500000, mfj = 750000, mfs = 397000, part_b = 594.00, part_d = 81.00 },
+]
+
+[aca]
+fpl_first_person = 14580
+fpl_each_additional = 5140
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00
