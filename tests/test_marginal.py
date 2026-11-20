@@ -75,10 +75,10 @@ def test_irmaa_uses_two_year_lookback(lib):
     p.inflation = 0.0
     s = build_marginal_series(p, lib, x_max=250_000)
     irmaa = [a for a in s.annotations if a.kind == "irmaa"]
-    assert irmaa[0].magi == 109_000  # 2028 thresholds = 2026 values at 0% inflation
-    assert irmaa[0].x == pytest.approx(59_000, abs=1)
+    assert irmaa[0].magi == 112_000  # 2028 thresholds = 2027 values at 0% inflation
+    assert irmaa[0].x == pytest.approx(62_000, abs=1)
     assert "2028" in irmaa[0].detail
-    expected = (284.10 - 202.90 + 14.50) * 12
+    expected = (293.10 - 209.40 + 15.40) * 12
     assert irmaa[0].annual_cost == pytest.approx(expected)
 
 
@@ -155,7 +155,8 @@ def test_irmaa_thresholds_follow_profile_inflation(lib):
     p.inflation = 0.03
     s = build_marginal_series(p, lib, x_max=250_000)
     first = [a for a in s.annotations if a.kind == "irmaa"][0]
-    assert first.magi == (109_000 * 1.03**2) // 1000 * 1000
+    # 2028 is projected one year from the official 2027 file.
+    assert first.magi == (112_000 * 1.03) // 1000 * 1000
     assert "projected at 3.0% inflation" in first.detail
 
 
@@ -172,7 +173,7 @@ def test_irmaa_top_tier_frozen_until_2028():
 
     lib = TaxLawLibrary()
     assert lib.federal(2027, 0.03).irmaa_tiers[-1].mfj == 750_000
-    assert lib.federal(2027, 0.03).irmaa_tiers[0].mfj == (218_000 * 1.03) // 1000 * 1000
+    assert lib.federal(2028, 0.03).irmaa_tiers[0].mfj == (224_000 * 1.03) // 1000 * 1000
     assert lib.federal(2028, 0.03).irmaa_tiers[-1].mfj == (750_000 * 1.03) // 1000 * 1000
 
 

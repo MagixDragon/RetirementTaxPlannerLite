@@ -1,0 +1,80 @@
+# Federal tax law for tax year 2022 (historical). See 2025.toml for the
+# format notes.
+#
+# The IRS life expectancy tables the app ships took effect this year.
+
+year = 2022
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2021-45 (inflation adjustments)",
+  "CMS 2022 Medicare Parts B and D premium fact sheets",
+  "HHS 2021 poverty guidelines (used for 2022 ACA coverage)",
+]
+
+[policy]
+personal_exemption = 0.0                 # 0 under TCJA (2018-2025)
+senior_deduction = false                 # the OBBBA senior deduction starts in 2025
+# ARPA's enhanced ACA credits applied (no 400% FPL cliff).
+aca_enhanced_subsidies = true
+
+[ordinary_brackets]
+single = [[0, 0.10], [10275, 0.12], [41775, 0.22], [89075, 0.24], [170050, 0.32], [215950, 0.35], [539900, 0.37]]
+mfj    = [[0, 0.10], [20550, 0.12], [83550, 0.22], [178150, 0.24], [340100, 0.32], [431900, 0.35], [647850, 0.37]]
+mfs    = [[0, 0.10], [10275, 0.12], [41775, 0.22], [89075, 0.24], [170050, 0.32], [215950, 0.35], [323925, 0.37]]
+hoh    = [[0, 0.10], [14650, 0.12], [55900, 0.22], [89050, 0.24], [170050, 0.32], [215950, 0.35], [539900, 0.37]]
+
+[standard_deduction]
+single = 12950
+mfj    = 25900
+mfs    = 12950
+hoh    = 19400
+
+[additional_standard_deduction]
+unmarried = 1750
+married   = 1400
+
+[senior_deduction]
+# Not in effect this year (policy.senior_deduction is false and the
+# law's first year is 2025). Kept so the file has the same shape.
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+single = [[0, 0.0], [41675, 0.15], [459750, 0.20]]
+mfj    = [[0, 0.0], [83350, 0.15], [517200, 0.20]]
+mfs    = [[0, 0.0], [41675, 0.15], [258600, 0.20]]
+hoh    = [[0, 0.0], [55800, 0.15], [488500, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2022, set by MAGI from 2020.
+premium_year = 2022
+lookback_years = 2
+part_b_standard = 170.10
+tiers = [
+  { single = 91000, mfj = 182000, mfs = 91000, part_b = 238.10, part_d = 12.40 },
+  { single = 114000, mfj = 228000, mfs = 91000, part_b = 340.20, part_d = 32.10 },
+  { single = 142000, mfj = 284000, mfs = 91000, part_b = 442.30, part_d = 51.70 },
+  { single = 170000, mfj = 340000, mfs = 91000, part_b = 544.30, part_d = 71.30 },
+  { single = 500000, mfj = 750000, mfs = 409000, part_b = 578.30, part_d = 77.90 },
+]
+
+[aca]
+fpl_first_person = 12880
+fpl_each_additional = 4540
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00

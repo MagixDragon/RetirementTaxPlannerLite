@@ -1,0 +1,81 @@
+# Federal tax law for tax year 2023 (historical). See 2025.toml for the
+# format notes.
+#
+# SECURE 2.0 raised the RMD start age to 73 from this year (already
+# how the app works).
+
+year = 2023
+status = "enacted"
+sources = [
+  "IRS Rev. Proc. 2022-38 (inflation adjustments)",
+  "CMS 2023 Medicare Parts B and D premium fact sheets",
+  "HHS 2022 poverty guidelines (used for 2023 ACA coverage)",
+]
+
+[policy]
+personal_exemption = 0.0                 # 0 under TCJA (2018-2025)
+senior_deduction = false                 # the OBBBA senior deduction starts in 2025
+# ARPA's enhanced ACA credits applied (no 400% FPL cliff).
+aca_enhanced_subsidies = true
+
+[ordinary_brackets]
+single = [[0, 0.10], [11000, 0.12], [44725, 0.22], [95375, 0.24], [182100, 0.32], [231250, 0.35], [578125, 0.37]]
+mfj    = [[0, 0.10], [22000, 0.12], [89450, 0.22], [190750, 0.24], [364200, 0.32], [462500, 0.35], [693750, 0.37]]
+mfs    = [[0, 0.10], [11000, 0.12], [44725, 0.22], [95375, 0.24], [182100, 0.32], [231250, 0.35], [346875, 0.37]]
+hoh    = [[0, 0.10], [15700, 0.12], [59850, 0.22], [95350, 0.24], [182100, 0.32], [231250, 0.35], [578100, 0.37]]
+
+[standard_deduction]
+single = 13850
+mfj    = 27700
+mfs    = 13850
+hoh    = 20800
+
+[additional_standard_deduction]
+unmarried = 1850
+married   = 1500
+
+[senior_deduction]
+# Not in effect this year (policy.senior_deduction is false and the
+# law's first year is 2025). Kept so the file has the same shape.
+amount_per_person = 6000
+phaseout_rate     = 0.06
+phaseout_per_person = true
+first_year = 2025
+last_year  = 2028
+mfs_eligible = false
+phaseout_start = { single = 75000, mfj = 150000, mfs = 75000, hoh = 75000 }
+
+[capital_gains]
+single = [[0, 0.0], [44625, 0.15], [492300, 0.20]]
+mfj    = [[0, 0.0], [89250, 0.15], [553850, 0.20]]
+mfs    = [[0, 0.0], [44625, 0.15], [276900, 0.20]]
+hoh    = [[0, 0.0], [59750, 0.15], [523050, 0.20]]
+capital_loss_limit = { single = 3000, mfj = 3000, mfs = 1500, hoh = 3000 }
+
+[niit]
+rate = 0.038
+threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
+
+[social_security]
+base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
+adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+
+[irmaa]
+# Medicare premiums paid in 2023, set by MAGI from 2021.
+premium_year = 2023
+lookback_years = 2
+part_b_standard = 164.90
+tiers = [
+  { single = 97000, mfj = 194000, mfs = 97000, part_b = 230.80, part_d = 12.20 },
+  { single = 123000, mfj = 246000, mfs = 97000, part_b = 329.70, part_d = 31.50 },
+  { single = 153000, mfj = 306000, mfs = 97000, part_b = 428.60, part_d = 50.70 },
+  { single = 183000, mfj = 366000, mfs = 97000, part_b = 527.50, part_d = 70.00 },
+  { single = 500000, mfj = 750000, mfs = 403000, part_b = 560.50, part_d = 76.40 },
+]
+
+[aca]
+fpl_first_person = 13590
+fpl_each_additional = 4720
+medicaid_expansion_pct = 1.38
+csr_limit_pct = 2.50
+subsidy_cliff_pct = 4.00

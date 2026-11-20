@@ -69,7 +69,7 @@ the forward-looking plan and the command-line exporter.
 
 ## Tax law data
 
-`data/federal/2026.toml` holds brackets, standard deductions, the
+`data/federal/<year>.toml` (2020 through 2027) holds brackets, standard deductions, the
 additional 65+ deduction, the OBBBA senior deduction (amount, 6% phase-out,
 first and last year), capital gains bands, NIIT, Social Security
 thresholds, IRMAA tiers for that premium year, and ACA poverty-line
@@ -91,6 +91,20 @@ mfs use the single values unless a file lists them.
 **User overrides.** The app also reads a `taxlaw` folder in the user's
 config directory; a file there replaces the shipped file for that year or
 state. Nothing needs code changes.
+
+**Older years (2020–2024).** The federal files are table additions only:
+the single-year tax math needs no code for them (the senior deduction is
+switched off and ARPA's ACA rules are set by `[policy]`). Three things the
+forward plan does not model yet for plans that start in those years:
+
+* 2020: the CARES Act waiver of all RMDs.
+* 2020–2021: the older IRS life expectancy tables (the shipped tables took
+  effect in 2022), so RMDs in those years come out a little small.
+* 2021–2024: the IRS waivers of yearly inherited IRA RMDs under the
+  10-year rule (owner had started RMDs, death in 2020 or later).
+
+State files hold one year (2026) and the app uses it for every year, so
+historical state tax needs a year-aware state loader first.
 
 **Projection.** Years without a file are built from the newest enacted
 year by `federal/projection.toml`: indexed amounts (brackets, standard
