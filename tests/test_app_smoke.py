@@ -301,3 +301,43 @@ def test_year_table_hides_a_tooltip_over_a_cell_without_one(window):
 
     QTest.qWait(600)  # Qt hides a tooltip after a short fade
     assert not QToolTip.isVisible()
+
+
+def test_file_menu_groups_and_report_item(window):
+    menu = window.menuBar().actions()[0].menu()
+    groups, current = [], []
+    for act in menu.actions():
+        if act.isSeparator():
+            groups.append(current)
+            current = []
+        else:
+            current.append(act.text().replace("&", ""))
+    groups.append(current)
+    assert [len(g) for g in groups] == [4, 3, 3, 1]
+    assert groups[2][-1] == "Export Report…"
+
+
+def test_export_report_with_and_without_plan(window, tmp_path):
+    from rtpl.model.plan import Plan
+    from rtpl.model.profile import Profile
+    from rtpl.report import write_report
+
+    path = Path("examples/profiles/retired_couple_ca.json")
+    window._load_profile(Profile.load(path), path)
+    window.recompute()
+    window.set_theme_mode("dark")  # the report is still drawn in light mode
+    title, sections, charts = window.report_contents()
+    assert [c.title for c in charts] == ["Marginal tax graph"]
+    assert sections[0].rows[0] == ("Name", window.form.profile().name)
+    out = tmp_path / "profile.pdf"
+    assert write_report(out, title, sections, charts) == 2
+    assert out.read_bytes().startswith(b"%PDF")
+
+    plan_path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(plan_path), plan_path)
+    window.recompute()
+    title, sections, charts = window.report_contents()
+    assert [c.title for c in charts] == ["Marginal tax graph", "Income and brackets", "Balances"]
+    assert sections[-1].heading == "Forward plan"
+    out = tmp_path / "plan.pdf"
+    assert write_report(out, title, sections, charts) == 4
