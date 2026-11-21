@@ -160,7 +160,7 @@ def compute_tax(
         ltcg = 0.0
 
     ss = profile.total("social_security")
-    agi_ex_ss = ordinary + qd + ltcg - h.adjustments
+    agi_ex_ss = ordinary + qd + ltcg - h.adjustments - h.hsa_deduction
     provisional = agi_ex_ss + h.tax_exempt_interest + 0.5 * ss
     if taxable_ss_override is None:
         taxable_ss = taxable_social_security(ss, provisional, law.ss_base[fs], law.ss_adjusted[fs])

@@ -7,6 +7,8 @@ name = "California"
 year = 2026
 sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
 taxes_social_security = false
+# No deduction for HSA contributions: the state adds them back to income.
+taxes_hsa_contributions = true
 notes = [
   "Top 13.3% includes the 1% Mental Health Services Tax over $1M.",
   "Senior exemption credit and renter's credit not modelled.",

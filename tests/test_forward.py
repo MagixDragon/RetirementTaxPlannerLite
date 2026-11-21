@@ -854,3 +854,124 @@ def test_qcd_year_table_column(lib):
     # Without QCDs there is no QCD column.
     header, _ = year_table(run_plan(qcd_plan(prof, []), lib, with_lines=False))
     assert not any("QCD" in h for h in header)
+
+
+# -- HSA contributions --------------------------------------------------------------
+
+
+def hsa_plan(prof, rules, accounts=None, **kw):
+    accounts = accounts or [Account(id="hsa", kind="hsa", owner=0, balance=10_000),
+                            Account(id="cash", kind="cash", owner=None, balance=200_000)]
+    incomes = kw.pop("incomes", [IncomeStream(kind="pension", amount=60_000, owner=0, cola="none")])
+    return Plan(profile=prof, accounts=accounts, incomes=incomes, rules=rules, assumptions=Assumptions(**kw))
+
+
+def test_hsa_contributions_need_no_wages_and_stop_with_medicare(lib):
+    prof = single(birth=1966)  # 60 in 2026, 65 in 2031
+    lives_to(prof, 67)
+    rule = Rule(kind="hsa_contribution", account="hsa", start=When(year=2026), end=When(event="last_death"),
+                mode="max")
+    base = {y.year: y for y in run_plan(hsa_plan(prof, []), lib, with_lines=False).years}
+    years = {y.year: y for y in run_plan(hsa_plan(prof, [rule]), lib, with_lines=False).years}
+    # A pension, no wages: the self-only limit plus the catch-up from 55.
+    assert years[2026].contributions == {"hsa": pytest.approx(4_400 + 1_000)}
+    assert years[2027].contributions == {"hsa": pytest.approx(4_500 + 1_000)}
+    assert years[2026].tax.agi == pytest.approx(base[2026].tax.agi - 5_400)
+    assert years[2026].net_cash_flow == pytest.approx(base[2026].net_cash_flow - 5_400 +
+                                                      (base[2026].tax.total_tax - years[2026].tax.total_tax))
+    assert years[2026].balances_end["hsa"] == pytest.approx((10_000 + 5_400) * 1.05)
+    # Projected limits grow with inflation (rounded down to $50); the catch-up stays $1,000.
+    law = lib.federal(2028, prof.inflation)
+    assert law.hsa_self_only == 4_500 * (1 + prof.inflation) // 50 * 50 and law.hsa_catch_up == 1_000
+    assert years[2030].contributions["hsa"] == pytest.approx(lib.federal(2030, prof.inflation).hsa_self_only + 1_000)
+    # Medicare from 65: with only a birth year, nothing in the year they turn 65.
+    assert years[2031].contributions == {} and years[2032].contributions == {}
+    assert any("stop with Medicare" in n for n in years[2031].notes)
+
+
+def test_hsa_family_limit_is_shared_and_catch_up_goes_to_each_owners_hsa(lib):
+    prof = couple(births=(1968, 1972))  # 58 and 54 in 2026; B turns 55 in 2027
+    lives_to(prof, 80)
+    accounts = [Account(id="a", kind="hsa", owner=0), Account(id="b", kind="hsa", owner=1),
+                Account(id="cash", kind="cash", owner=None, balance=100_000)]
+    rules = [Rule(kind="hsa_contribution", account=k, start=When(year=2026), end=When(year=2027), mode="max",
+                  coverage="family") for k in ("a", "b")]
+    years = {y.year: y for y in run_plan(hsa_plan(prof, rules, accounts), lib, with_lines=False).years}
+    assert years[2026].contributions == {"a": pytest.approx(8_750 + 1_000)}  # A's rule fills the family limit
+    assert years[2027].contributions == {"a": pytest.approx(9_000 + 1_000), "b": pytest.approx(1_000)}
+    # A fixed amount on the first rule splits the family limit.
+    rules[0].mode, rules[0].amount = "fixed", 5_000
+    years = {y.year: y for y in run_plan(hsa_plan(prof, rules, accounts), lib, with_lines=False).years}
+    assert years[2026].contributions == {"a": pytest.approx(5_000), "b": pytest.approx(3_750)}
+    # Self-only coverage: each has a limit of their own.
+    for r in rules:
+        r.coverage, r.mode = "self", "max"
+    years = {y.year: y for y in run_plan(hsa_plan(prof, rules, accounts), lib, with_lines=False).years}
+    assert years[2026].contributions == {"a": pytest.approx(5_400), "b": pytest.approx(4_400)}
+
+
+def test_hsa_fixed_amount_is_capped_at_the_limit(lib):
+    prof = single(birth=1980)
+    lives_to(prof, 47)
+    rule = Rule(kind="hsa_contribution", account="hsa", start=When(year=2026), amount=6_000)
+    y0 = run_plan(hsa_plan(prof, [rule]), lib, with_lines=False).years[0]
+    assert y0.contributions == {"hsa": pytest.approx(4_400)}
+    assert any("capped at $4,400" in n for n in y0.notes)
+
+
+def test_hsa_contributions_past_65_without_medicare_until_social_security(lib):
+    prof = single(birth=1960)  # 66 in 2026
+    prof.people[0].medicare_part_b = False  # not enrolled at 65 (an employer's plan)
+    lives_to(prof, 70)
+    rule = Rule(kind="hsa_contribution", account="hsa", start=When(year=2026), end=When(event="last_death"),
+                mode="max")
+    plan = hsa_plan(prof, [rule])
+    plan.people[0].social_security = SocialSecurity(fra_benefit=30_000, claim_age=67.25)
+    years = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    # Social Security from April 2027 backdates Part A 6 months, to October 2026: 9 months.
+    assert years[2026].contributions["hsa"] == pytest.approx((4_400 + 1_000) * 9 / 12)
+    assert any("prorated to 9 months" in n for n in years[2026].notes)
+    assert years[2027].contributions == {}
+    assert plan.hsa_last_year(0) == 2026
+    # Claiming at 68 instead: all of 2026, half of 2027 (Part A from July 2027).
+    plan.people[0].social_security.claim_age = 68
+    years = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    assert years[2026].contributions["hsa"] == pytest.approx(5_400)
+    assert years[2027].contributions["hsa"] == pytest.approx(5_500 / 2)
+    # On Medicare (the baseline says so): never.
+    prof.people[0].medicare_part_b = True
+    assert run_plan(plan, lib, with_lines=False).years[0].contributions == {}
+
+
+def test_hsa_deduction_is_added_back_in_california(lib):
+    prof = single(birth=1970)
+    prof.state = "CA"
+    lives_to(prof, 57)
+    rule = Rule(kind="hsa_contribution", account="hsa", start=When(year=2026), mode="max")
+    base = run_plan(hsa_plan(prof, []), lib, with_lines=False).years[0]
+    y0 = run_plan(hsa_plan(prof, [rule]), lib, with_lines=False).years[0]
+    assert y0.tax.federal_tax < base.tax.federal_tax
+    assert y0.tax.state_tax == pytest.approx(base.tax.state_tax)
+    prof.state = "OR"
+    base = run_plan(hsa_plan(prof, []), lib, with_lines=False).years[0]
+    y0 = run_plan(hsa_plan(prof, [rule]), lib, with_lines=False).years[0]
+    assert y0.tax.state_tax < base.tax.state_tax
+
+
+def test_hsa_rules_validate_and_show_in_the_year_table(lib):
+    prof = single(birth=1970)
+    lives_to(prof, 57)
+    plan = hsa_plan(prof, [Rule(kind="hsa_contribution", account="cash", start=When(year=2026), mode="max")])
+    assert any("into an HSA owned by one person" in p for p in plan.validate())
+    plan.rules[0].account = "hsa"
+    plan.rules[0].mode = "spread"
+    assert any("can't use the amount mode" in p for p in plan.validate())
+    plan.rules[0].mode = "max"
+    assert plan.validate() == []
+    assert plan.rules[0].describe(prof, {a.id: a for a in plan.accounts}).startswith(
+        "HSA contribution to A HSA (self-only coverage)")
+    header, rows = year_table(run_plan(plan, lib, with_lines=False))
+    assert "A HSA contribution" in header
+    assert rows[0][header.index("A HSA contribution")] == "5,400"
+    header, _ = year_table(run_plan(hsa_plan(prof, []), lib, with_lines=False))
+    assert "A HSA contribution" not in header

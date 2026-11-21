@@ -85,3 +85,13 @@ annual_limit = 111000
 # SECURE 2.0 one-time gift to a charitable gift annuity or remainder
 # trust (from 2023; inside the annual limit). 0 = not yet allowed.
 split_interest_limit = 55000
+
+[hsa]
+# Health savings account contribution limits (IRC 223(b)), for someone
+# covered by a high-deductible health plan all year and not on Medicare.
+# Indexed for inflation (Rev. Proc. 2025-19). The catch-up for those 55 or older
+# by the end of the year is fixed in statute and goes only into the HSA
+# of the person it belongs to.
+self_only = 4400
+family = 8750
+catch_up = 1000

@@ -159,3 +159,12 @@ def test_earnings_test_limits(lib):
     later = lib.federal(2030)
     assert later.earnings_test_under_fra > 25_560
     assert later.earnings_test_under_fra % 120 == 0 and later.earnings_test_fra_year % 120 == 0
+
+
+def test_hsa_limits(lib):
+    limits = {y: (lib.federal(y).hsa_self_only, lib.federal(y).hsa_family) for y in range(2020, 2028)}
+    assert limits == {2020: (3_550, 7_100), 2021: (3_600, 7_200), 2022: (3_650, 7_300), 2023: (3_850, 7_750),
+                      2024: (4_150, 8_300), 2025: (4_300, 8_550), 2026: (4_400, 8_750), 2027: (4_500, 9_000)}
+    assert all(lib.federal(y).hsa_catch_up == 1_000 for y in (2020, 2027, 2035))
+    assert lib.state("CA").taxes_hsa_contributions and lib.state("NJ").taxes_hsa_contributions
+    assert not lib.state("OR").taxes_hsa_contributions

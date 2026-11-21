@@ -91,6 +91,8 @@ def state_income_tax(
     income_tax = gains_tax = 0.0
     if state.has_income_tax:
         base = agi
+        if state.taxes_hsa_contributions:
+            base += profile.household.hsa_deduction
         base -= _exempt_social_security(profile, state, agi, taxable_ss)
         base -= _retirement_exclusion(profile, state, extra_ira)
         cg_excluded = state.capital_gains_exclusion * max(0.0, net_ltcg)

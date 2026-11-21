@@ -8,8 +8,9 @@ Design points (see docs/design.md, "Forward-looking plan"):
   calendar year) and shown in whatever form is convenient.
 * Accounts are individual: each spouse can have several of each type.
   The graph groups them by type unless asked to show each one.
-* Rules move money between accounts (Roth conversions, withdrawals) or
-  out to charity (qualified charitable distributions). For
+* Rules move money between accounts (Roth conversions, withdrawals), out
+  to charity (qualified charitable distributions) or into an HSA from the
+  household's cash flow (HSA contributions). For
   each account and kind of rule, the rule with the narrowest time span
   wins in a year, so a one-year rule overrides a range rule.
 * Withdrawals happen where a rule (or an RMD) says so. Money left over
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -112,7 +114,27 @@ RULE_KINDS = {
     "roth_conversion": "Roth conversion",
     "withdrawal": "Withdrawal",
     "qcd": "Qualified charitable distribution",
+    "hsa_contribution": "HSA contribution",
 }
+# Rules that put money into their account rather than take it out.
+CONTRIBUTION_KINDS = ("hsa_contribution",)
+
+# HSA contributions (IRC 223) need high-deductible health plan coverage
+# and no Medicare; there is no earned-income test. The limit depends on
+# the coverage: self-only, or family (shared by spouses, who can split it
+# between their HSAs). From 55 each person can add a catch-up, but only to
+# an HSA they own (FederalLaw.hsa_self_only, hsa_family, hsa_catch_up).
+HSA_COVERAGE = {
+    "self": "Self-only",
+    "family": "Family",
+}
+HSA_CATCH_UP_AGE = 55
+# Medicare Part A starts the month a person turns 65 (so, with only a
+# birth year, as early as January of that year). If they enroll later, by
+# claiming Social Security after 65 for example, Part A is backdated up
+# to 6 months, but not before 65.
+HSA_MEDICARE_AGE = 65
+HSA_PART_A_LOOKBACK = 0.5  # years
 
 # Qualified charitable distributions (QCDs) go straight from an IRA to a
 # charity: left out of income, counted toward the account's RMD, up to a
@@ -131,12 +153,14 @@ AMOUNT_MODES = {
     "spread": "Spread the balance evenly over the remaining years of the rule (1/N)",
     "all": "Take the whole balance",
     "rmd": "The year's RMD from the account (QCDs only)",
+    "max": "The most allowed (contributions only)",
 }
 # The amount modes each rule kind can use.
 RULE_MODES = {
     "roth_conversion": ("fixed", "fill", "spread", "all"),
     "withdrawal": ("fixed", "fill", "spread", "all"),
     "qcd": ("fixed", "rmd"),
+    "hsa_contribution": ("max", "fixed"),
 }
 
 # Targets for "fill" rules: what to fill up to.
@@ -390,8 +414,8 @@ class Assumptions:
 
 @dataclass
 class Rule:
-    kind: str  # roth_conversion or withdrawal
-    account: str  # source account id
+    kind: str  # a key of RULE_KINDS
+    account: str  # source account id (for a contribution, the account paid into)
     start: When
     end: When | None = None  # None = a one-year rule
     mode: str = "fixed"
@@ -400,6 +424,7 @@ class Rule:
     growth: str = "none"  # for "fixed": how the amount changes, a key of RULE_GROWTH_KINDS
     growth_rate: float = 0.0  # for growth "fixed"
     to_account: str | None = None  # Roth account for conversions (default: owner's Roth IRA)
+    coverage: str = "self"  # HSA contributions: the owner's health plan coverage, a key of HSA_COVERAGE
     enabled: bool = True
     note: str = ""
 
@@ -433,7 +458,11 @@ class Rule:
             "spread": "spread evenly (1/N)",
             "all": "whole balance",
             "rmd": "the RMD",
+            "max": "the most allowed",
         }.get(self.mode, self.mode)
+        if self.kind == "hsa_contribution":
+            cover = HSA_COVERAGE.get(self.coverage, self.coverage).lower()
+            return f"HSA contribution to {name} ({cover} coverage), {when}, {how}"
         return f"{RULE_KINDS.get(self.kind, self.kind)} from {name}, {when}, {how}"
 
 
@@ -514,6 +543,49 @@ class Plan:
     def account(self, acct_id: str) -> Account | None:
         return next((a for a in self.accounts if a.id == acct_id), None)
 
+    def medicare_start(self, i: int) -> float | None:
+        """When person ``i``'s Medicare Part A starts, as a year with the
+        month as a fraction (2031.25 = April 2031), for HSA contributions.
+        None when they are on Medicare for the whole plan.
+
+        * Medicare on the baseline (before 65, for example on SSDI): always.
+        * By default, the month they turn 65; with only a birth year, the
+          plan takes January of that year so contributions never run over.
+        * Not enrolled at 65 (the baseline says no Medicare Part B, say on
+          an employer's plan): Part A starts when Social Security does
+          (claiming it after 65 enrolls them), backdated up to 6 months,
+          but not before 65.
+        """
+        p = self.profile.people[i]
+        if p.medicare_part_b is True:
+            return None
+        at_65 = float(p.birth_year + HSA_MEDICARE_AGE)
+        if p.medicare_part_b is None:
+            return at_65
+        ss = self.people[i].social_security if i < len(self.people) else None
+        if ss is None or ss.current_benefit is not None or ss.ssdi:
+            claimed = float(self.start_year - 1)
+        else:
+            claimed = p.birth_year + float(ss.claim_age)
+        return max(at_65, claimed - HSA_PART_A_LOOKBACK)
+
+    def hsa_months(self, i: int, year: int) -> int:
+        """Months of ``year`` person ``i`` can contribute to an HSA (before
+        Medicare). The plan assumes HSA-eligible health coverage while the
+        contribution rule runs."""
+        start = self.medicare_start(i)
+        if start is None:
+            return 0
+        return round(12 * min(1.0, max(0.0, start - year)))
+
+    def hsa_last_year(self, i: int) -> int | None:
+        """The last year person ``i`` can put anything into an HSA (None if never)."""
+        start = self.medicare_start(i)
+        if start is None:
+            return None
+        last = math.ceil(start) - 1
+        return last if last >= self.start_year else None
+
     def timing_notes(self) -> list[str]:
         """Rules and income streams that start before the plan's first year
         or end before they start. Not errors: the plan counts an early start
@@ -567,6 +639,12 @@ class Plan:
                 problems.append("Rule: a fill rule needs a target such as " + FILL_TARGET_HELP)
             if r.growth not in RULE_GROWTH_KINDS:
                 problems.append(f"Rule: unknown amount growth {r.growth!r}")
+            if r.kind == "hsa_contribution":
+                acct = self.account(r.account)
+                if acct is not None and (acct.kind != "hsa" or acct.owner is None):
+                    problems.append(f"Rule: HSA contributions go into an HSA owned by one person ({r.account!r})")
+                if r.coverage not in HSA_COVERAGE:
+                    problems.append(f"Rule: unknown HSA coverage {r.coverage!r}")
         return problems
 
     # -- persistence --------------------------------------------------

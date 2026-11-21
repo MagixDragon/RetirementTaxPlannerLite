@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from rtpl.engine.forward import run_plan
-from rtpl.model.plan import Plan
+from rtpl.model.plan import Account, Plan
 
 PLAN = Path("examples/plans/couple_conversions_inherited.json")
 
@@ -521,3 +521,29 @@ def test_add_a_qcd_strategy(window):
     # Switching to a withdrawal offers every amount mode again.
     form.kind.setCurrentIndex(form.kind.findData("withdrawal"))
     assert rule.kind == "withdrawal" and form.mode.count() == 4
+
+
+def test_add_an_hsa_contribution(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    plan.accounts.append(Account(id="p1_hsa", kind="hsa", owner=0, balance=5_000))
+    ed.rebuild()
+    ed.add_item("hsa_contribution")
+    rule = plan.rules[-1]
+    assert rule.kind == "hsa_contribution" and rule.account == "p1_hsa" and rule.mode == "max"
+    assert rule.coverage == "family"  # a couple
+    last = plan.hsa_last_year(0)
+    assert last is not None and rule.end.resolve(plan.profile) == last  # the year before Medicare
+    form = ed.forms["rules"]
+    assert form.form.labelForField(form.account).text() == "Into account"
+    assert [form.account.itemData(i) for i in range(form.account.count())] == ["p1_hsa"]
+    assert [form.mode.itemData(i) for i in range(form.mode.count())] == ["max", "fixed"]
+    assert "self-only or $" in form.hsa_hint.text() and "into this HSA only" in form.hsa_hint.text()
+    assert find_item(ed, rule).text(0).startswith("Contribute to") and "the most allowed" in find_item(ed, rule).text(0)
+    form.coverage.setCurrentIndex(form.coverage.findData("self"))
+    assert rule.coverage == "self"
+    form.mode.setCurrentIndex(form.mode.findData("fixed"))
+    form.amount.setValue(3_000)
+    assert rule.mode == "fixed" and rule.amount == 3_000
+    form.kind.setCurrentIndex(form.kind.findData("withdrawal"))
+    assert form.form.labelForField(form.account).text() == "From account"

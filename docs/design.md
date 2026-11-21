@@ -281,7 +281,7 @@ final balances.
 | Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI, with an optional early end age (a claiming age past FRA suspends SSDI's retirement benefit until then) |
 | Person (on the baseline) | birth year, life expectancy (default 95) |
 | Assumptions | Social Security COLA (default: inflation), default return and cash return (nominal, before inflation; every cash account earns the cash return), yearly spending (today's dollars), spending after the first death (% of the couple's), the spending order, MAGI for the two years before the plan (for IRMAA) |
-| Rule | Roth conversion, withdrawal or qualified charitable distribution (QCD), from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance. A fixed amount can stay flat, grow with inflation (entered in today's dollars) or grow by a fixed % a year after the rule's first year (negative for a glide path down). A QCD takes a fixed amount or the year's RMD from the account |
+| Rule | Roth conversion, withdrawal or qualified charitable distribution (QCD), from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance. A fixed amount can stay flat, grow with inflation (entered in today's dollars) or grow by a fixed % a year after the rule's first year (negative for a glide path down). A QCD takes a fixed amount or the year's RMD from the account. An HSA contribution goes into one person's HSA: the most allowed or a fixed amount, with the owner's coverage (self-only or family) |
 
 **Overrides.** For each account and kind of rule, the rule with the
 narrowest span wins in a year (ties go to the later rule). So "fill to 22%,
@@ -326,6 +326,53 @@ from an IRA to a charity (IRC 408(d)(8)):
   payments can be entered as an annuity income stream; and the reduction
   of the excludable QCD by deductible IRA contributions made after 70½
   (the plan has no IRA contributions).
+
+**HSA contributions.** An HSA contribution rule pays into one person's
+HSA from the year's cash flow (IRC 223). It is meant for early retirees
+who keep a high-deductible health plan (from an employer, COBRA or the
+ACA marketplace) until Medicare:
+
+* No earned income is needed, unlike IRA and 401(k) contributions, so a
+  retiree living on savings can contribute. The plan takes HSA-eligible
+  coverage as given for the years of the rule.
+* Limits by coverage: self-only or family, in `[hsa]` in each federal
+  year file (2020: $3,550 / $7,100; 2024: $4,150 / $8,300; 2025: $4,300 /
+  $8,550; 2026: $4,400 / $8,750; 2027: $4,500 / $9,000), grown with
+  inflation (rounded down to $50) when projected. Spouses with family
+  coverage share one family limit, split between their HSAs as they like:
+  rules are filled in list order, so two "most allowed" rules give the
+  first HSA the whole family limit; a fixed amount on the first rule splits
+  it. (The tax rules treat a couple as both having family coverage if
+  either does; the plan uses each rule's coverage as entered.)
+* The catch-up: $1,000 a year (fixed in statute, not indexed) for each
+  person 55 or older by the end of the year. It only goes into the HSA
+  that person owns, so with family coverage each spouse needs their own
+  HSA for their catch-up. Every HSA in the plan belongs to one person.
+* Medicare ends contributions. Part A starts the month a person turns 65;
+  with only birth years (issue #23 adds the month) the plan takes January,
+  so nothing goes in the year they turn 65. A year with Medicare part-way
+  through gets the limit (and catch-up) prorated by the months before it.
+  If the baseline says the person is **not** on Medicare at 65 (still on
+  an employer's plan, say), they can keep contributing until Social
+  Security starts, since claiming it after 65 enrolls them in Part A. Part
+  A is then backdated up to 6 months (not before 65), so the plan stops 6
+  months before the claim; in real life, stop contributing 6 months
+  before applying for Social Security or Medicare. Someone on Medicare
+  before 65 (the baseline says so) can't contribute.
+* The contribution is an above-the-line deduction: it lowers AGI, and so
+  the MAGI for IRMAA and the ACA, before fill rules are solved. California
+  and New Jersey don't allow it, so their state files add it back
+  (`taxes_hsa_contributions`). It is paid from the year's cash flow like
+  spending; a deficit is taken from the spending order as usual. The year
+  table has an HSA contribution column per account, and notes show caps,
+  prorated years and the year contributions stop.
+* Employer contributions (and payroll contributions through a cafeteria
+  plan) count toward the same limit; the "most allowed" amount doesn't
+  know about them, so use a fixed amount for the rest. Payroll
+  contributions also avoid Social Security and Medicare tax, which the
+  plan doesn't model. Not modelled either: the last-month rule and its
+  testing period, contributions for a year made by the next April, and
+  the once-in-a-lifetime IRA-to-HSA transfer.
 
 **RMD already taken.** A plan started mid-year can mark a traditional or
 inherited account's RMD as already taken for the first year
@@ -389,13 +436,14 @@ means it stops applying once the plan starts in a later year.
    recomputed as if claimed that many months later. The year table's *SS withheld* column and the notes show
    both. SSDI is left out (it has its own work rules), and pensions, IRA
    withdrawals and investment income never count.
-5. **Rules.** Fixed, spread and whole-balance rules first, then fill rules
+5. **Rules.** HSA contributions first (see above), then fixed, spread and whole-balance rules, then fill rules
    in list order; each fill amount is solved by bisection on the whole
    return.
 6. **Tax.** `compute_tax()` with that year's law (projected past the newest
    data file), the year's filing status (joint through the year of death,
    then single), and inflation-indexed adjustments and itemized deductions.
-7. **Cash flow.** Income minus spending, tax and IRMAA surcharges; after
+7. **Cash flow.** Income minus spending, tax, IRMAA surcharges and HSA
+   contributions; after
    the first death a couple's spending is the survivor's share. A surplus
    goes into the taxable account (or cash); a deficit is taken from the
    account types in the spending order (by default cash, then the taxable
