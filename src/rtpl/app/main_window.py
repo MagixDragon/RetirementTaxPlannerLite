@@ -26,8 +26,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProxyStyle,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionMenuItem,
     QTableWidget,
     QTableWidgetItem,
     QStackedWidget,
@@ -46,6 +49,7 @@ from rtpl.app.plan_editor import PlanEditor
 from rtpl.app.plan_view import PlanView
 from rtpl.app.profile_form import ProfileForm, money_box
 from rtpl.app.side_panel import PanelHost, PanelTabs, SidePanel
+from rtpl.charts.forward_chart import render_balances, render_income
 from rtpl.charts.marginal_chart import render_marginal
 from rtpl.engine.marginal import (
     ANNOTATIONS,
@@ -57,6 +61,7 @@ from rtpl.engine.marginal import (
 from rtpl.engine.tax import IncomeSource
 from rtpl.model.plan import Plan
 from rtpl.model.profile import Person, Profile
+from rtpl.report import ReportChart, Section, profile_sections, write_report
 from rtpl.taxlaw.loader import TaxLawLibrary
 from rtpl.theme import Theme
 
@@ -70,12 +75,39 @@ def config_dir() -> Path:
     return path
 
 
+class AppStyle(QProxyStyle):
+    """Fusion, with menu separators drawn in the palette's Mid color so the
+    groups in a menu show in dark mode too (Fusion's own line nearly matches
+    a dark menu's background)."""
+
+    def __init__(self) -> None:
+        super().__init__("Fusion")
+
+    def drawControl(self, element, option, painter, widget=None) -> None:
+        if (element == QStyle.ControlElement.CE_MenuItem and isinstance(option, QStyleOptionMenuItem)
+                and option.menuItemType == QStyleOptionMenuItem.MenuItemType.Separator):
+            r = option.rect
+            painter.save()
+            painter.setPen(option.palette.color(QPalette.ColorRole.Mid))
+            y = r.center().y()
+            painter.drawLine(r.left() + 6, y, r.right() - 6, y)
+            painter.restore()
+            return
+        super().drawControl(element, option, painter, widget)
+
+
 def apply_app_theme(app: QApplication, mode: str) -> str:
     """Apply light/dark to the Qt widgets. Returns the effective mode."""
+    hints = QGuiApplication.styleHints()
+    can_set = hasattr(hints, "setColorScheme")  # Qt 6.8 and later
     if mode == "system":
-        scheme = QGuiApplication.styleHints().colorScheme()
-        mode = "dark" if scheme == Qt.ColorScheme.Dark else "light"
-    app.setStyle("Fusion")
+        if can_set:
+            hints.unsetColorScheme()  # forget an earlier Light or Dark choice
+        mode = "dark" if hints.colorScheme() == Qt.ColorScheme.Dark else "light"
+    elif can_set:
+        # Tell Qt too, so nothing follows the system's scheme behind our back
+        # (with Windows in dark mode, Fusion's own palette is dark).
+        hints.setColorScheme(Qt.ColorScheme.Dark if mode == "dark" else Qt.ColorScheme.Light)
     pal = QPalette()
     if mode == "dark":
         c = {
@@ -103,8 +135,45 @@ def apply_app_theme(app: QApplication, mode: str) -> str:
         pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#7a7970"))
         pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#7a7970"))
     else:
-        pal = app.style().standardPalette()
+        # Fusion's classic light colors, set out in full rather than taken
+        # from standardPalette(), which follows the system's dark mode.
+        c = {
+            QPalette.ColorRole.Window: "#efefef",
+            QPalette.ColorRole.WindowText: "#000000",
+            QPalette.ColorRole.Base: "#ffffff",
+            QPalette.ColorRole.Light: "#ffffff",
+            QPalette.ColorRole.Midlight: "#cacaca",
+            QPalette.ColorRole.Mid: "#b8b8b8",
+            QPalette.ColorRole.Dark: "#9f9f9f",
+            QPalette.ColorRole.Shadow: "#767676",
+            QPalette.ColorRole.AlternateBase: "#f7f7f7",
+            QPalette.ColorRole.Text: "#000000",
+            QPalette.ColorRole.Button: "#efefef",
+            QPalette.ColorRole.ButtonText: "#000000",
+            QPalette.ColorRole.BrightText: "#ffffff",
+            QPalette.ColorRole.Highlight: "#308cc6",
+            QPalette.ColorRole.HighlightedText: "#ffffff",
+            QPalette.ColorRole.ToolTipBase: "#ffffdc",
+            QPalette.ColorRole.ToolTipText: "#000000",
+            QPalette.ColorRole.PlaceholderText: "#6e6e6e",
+            QPalette.ColorRole.Link: "#0000ff",
+            QPalette.ColorRole.LinkVisited: "#ff00ff",
+        }
+        for role, color in c.items():
+            pal.setColor(role, QColor(color))
+        for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText):
+            pal.setColor(QPalette.ColorGroup.Disabled, role, QColor("#bebebe"))
     app.setPalette(pal)
+    # Set the style after the palette: changing the style re-polishes every
+    # widget, and widgets with a style sheet (the side panels) take their
+    # colors at that moment. Style sheets are re-applied too, since a
+    # "palette(...)" color in one is read when the sheet is set.
+    app.setStyle(AppStyle())
+    for widget in app.allWidgets():
+        sheet = widget.styleSheet()
+        if sheet:
+            widget.setStyleSheet("")
+            widget.setStyleSheet(sheet)
     return mode
 
 
@@ -515,6 +584,10 @@ class MainWindow(QMainWindow):
         self.export_table_action.setToolTip("Save the forward plan's year table as a spreadsheet (.ods)\nor CSV")
         self.export_table_action.setEnabled(False)
         m.addAction(self.export_table_action)
+        report = QAction("Export &Report…", self, shortcut="Ctrl+Shift+R", triggered=self.export_report)
+        report.setToolTip("Save one PDF with the profile and every chart (the forward plan's\n"
+                          "charts too when a plan is open), ready to print or share")
+        m.addAction(report)
         m.addSeparator()
         m.addAction(QAction("E&xit", self, shortcut=QKeySequence.StandardKey.Quit, triggered=self.close))
 
@@ -849,6 +922,60 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Export Year Table", f"Could not save {path}:\n{exc}")
             return
         self.statusBar().showMessage(f"Exported {path}", 4000)
+
+    def export_report(self) -> None:
+        """One PDF: the profile, the marginal graph and, with a plan open, the
+        forward plan's charts. Drawn in light mode, which prints well."""
+        if self.series is None:
+            QMessageBox.information(self, "Export Report", "Fix the profile so the marginal graph draws, then try again.")
+            return
+        start = self._suggested_plan_path(" report.pdf") if self.plan_view.plan is not None else self._suggested_path(" report.pdf")
+        path, _ = QFileDialog.getSaveFileName(self, "Export Report", start, "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            pages = write_report(path, *self.report_contents())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Export Report", f"Could not save {path}:\n{exc}")
+            return
+        self.statusBar().showMessage(f"Exported {path} ({pages} pages)", 4000)
+
+    def report_contents(self) -> tuple[str, list[Section], list[ReportChart]]:
+        """The report's title, profile sections and charts, as the window shows them now."""
+        assert self.series is not None
+        palette = self.theme.palette("light")
+        profile = self.form.profile()
+        series = self.series
+        state = series.state
+        sections = profile_sections(profile, state_name=state.name if state else None)
+        b = series.baseline
+        sections.append(Section(f"Baseline tax for {profile.year}", [
+            ("AGI", f"${b.agi:,.0f}"),
+            ("Taxable income", f"${b.taxable_income:,.0f}"),
+            ("Federal tax", f"${b.federal_tax:,.0f}"),
+            ("State tax", f"${b.state_tax:,.0f}"),
+        ]))
+        vis = self.visibility()
+        charts = [ReportChart("Marginal tax graph", lambda fig: render_marginal(fig, series, vis, palette))]
+        title = profile.name
+        plan, result = self.plan_view.plan, self.plan_view.result
+        if plan is not None and result is not None and result.years:
+            title = plan.title
+            view = self.plan_view
+            kw = dict(detail=view.detail.isChecked(), todays_dollars=view.todays.isChecked())
+            plan_vis = view.visibility()
+            rows = [("Plan", plan.name)] if plan.name.strip() else []
+            rows += [
+                ("Years", f"{result.years[0].year} to {result.years[-1].year}"),
+                ("Amounts", "Today's dollars" if kw["todays_dollars"] else "Future (nominal) dollars"),
+            ]
+            sections.append(Section("Forward plan", rows))
+            charts.append(ReportChart("Income and brackets",
+                                      lambda fig: render_income(fig, result, plan_vis, palette, **kw)))
+            charts.append(ReportChart("Balances", lambda fig: render_balances(fig, result, palette, **kw)))
+        return title, sections, charts
 
     def about(self) -> None:
         years = ", ".join(str(y) for y in self.library.enacted_years)

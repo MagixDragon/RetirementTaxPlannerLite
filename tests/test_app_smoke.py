@@ -301,3 +301,73 @@ def test_year_table_hides_a_tooltip_over_a_cell_without_one(window):
 
     QTest.qWait(600)  # Qt hides a tooltip after a short fade
     assert not QToolTip.isVisible()
+
+
+def test_file_menu_groups_and_report_item(window):
+    menu = window.menuBar().actions()[0].menu()
+    groups, current = [], []
+    for act in menu.actions():
+        if act.isSeparator():
+            groups.append(current)
+            current = []
+        else:
+            current.append(act.text().replace("&", ""))
+    groups.append(current)
+    assert [len(g) for g in groups] == [4, 3, 3, 1]
+    assert groups[2][-1] == "Export Report…"
+
+
+def test_export_report_with_and_without_plan(window, tmp_path):
+    from rtpl.model.plan import Plan
+    from rtpl.model.profile import Profile
+    from rtpl.report import write_report
+
+    path = Path("examples/profiles/retired_couple_ca.json")
+    window._load_profile(Profile.load(path), path)
+    window.recompute()
+    window.set_theme_mode("dark")  # the report is still drawn in light mode
+    title, sections, charts = window.report_contents()
+    assert [c.title for c in charts] == ["Marginal tax graph"]
+    assert sections[0].rows[0] == ("Name", window.form.profile().name)
+    out = tmp_path / "profile.pdf"
+    assert write_report(out, title, sections, charts) == 2
+    assert out.read_bytes().startswith(b"%PDF")
+
+    plan_path = Path("examples/plans/couple_conversions_inherited.json")
+    window.load_plan(Plan.load(plan_path), plan_path)
+    window.recompute()
+    title, sections, charts = window.report_contents()
+    assert [c.title for c in charts] == ["Marginal tax graph", "Income and brackets", "Balances"]
+    assert sections[-1].heading == "Forward plan"
+    out = tmp_path / "plan.pdf"
+    assert write_report(out, title, sections, charts) == 4
+
+
+def test_light_mode_uses_light_widget_colors_whatever_the_system_scheme(window):
+    from PySide6.QtGui import QPalette
+
+    app = QtWidgets.QApplication.instance()
+    window.set_theme_mode("dark")
+    assert app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    window.set_theme_mode("light")
+    pal = app.palette()
+    assert pal.color(QPalette.ColorRole.Window).lightness() > 200
+    assert pal.color(QPalette.ColorRole.Base).lightness() > 200
+    assert pal.color(QPalette.ColorRole.Mid) != pal.color(QPalette.ColorRole.Window)  # separators show
+    window.set_theme_mode("system")
+
+
+@pytest.mark.parametrize("pinned", [True, False])
+def test_side_panels_follow_each_theme_change(window, pinned):
+    window.resize(1024, 740)
+    window.show()
+    panel = window.inputs_panel
+    window.panels.set_pinned(panel, pinned)
+    window.panels.set_open(panel, True)
+    for mode, light in (("light", True), ("dark", False), ("light", True), ("dark", False)):
+        window.set_theme_mode(mode)
+        QtWidgets.QApplication.instance().processEvents()
+        img = panel.grab().toImage()
+        color = img.pixelColor(img.width() // 2, img.height() - 6)
+        assert (color.lightness() > 128) is light, (mode, color.name())
+    window.set_theme_mode("system")

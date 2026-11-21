@@ -81,7 +81,8 @@ change to `main`.
   position and panel layout; View > Reset Window Layout forgets them.
 * A data table that lists every rate change and threshold, for screen
   readers and for copying.
-* Export to PNG, SVG or PDF.
+* Export a chart to PNG, SVG or PDF, or File > Export Report for one PDF
+  with the profile and every chart (the forward plan's too when a plan is open).
 
 ## Forward-looking plans
 
