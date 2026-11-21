@@ -496,3 +496,28 @@ def test_export_year_table(window, tmp_path, monkeypatch):
     window.setWindowModified(False)  # no save prompt
     window.new_profile()  # no plan: nothing to export
     assert not window.export_table_action.isEnabled()
+
+
+def test_add_a_qcd_strategy(window):
+    ed = window.plan_editor
+    plan = window.plan_view.plan
+    ed.add_item("qcd")
+    rule = plan.rules[-1]
+    assert rule.kind == "qcd" and rule.mode == "rmd" and plan.account(rule.account).kind in ("traditional_ira",
+                                                                                               "inherited_ira")
+    form = ed.forms["rules"]
+    assert ed.stack.currentWidget() is form
+    # Only IRAs, and only the fixed and RMD amounts, are offered.
+    kinds = {plan.account(form.account.itemData(i)).kind for i in range(form.account.count())}
+    assert kinds <= {"traditional_ira", "inherited_ira"}
+    assert [form.mode.itemData(i) for i in range(form.mode.count())] == ["fixed", "rmd"]
+    assert "Limit $" in form.qcd_hint.text() and "age 71" in form.qcd_hint.text()
+    assert find_item(ed, rule).text(0).startswith("QCD from") and "the RMD" in find_item(ed, rule).text(0)
+    form.mode.setCurrentIndex(form.mode.findData("fixed"))
+    form.amount.setValue(20_000)
+    assert rule.mode == "fixed" and rule.amount == 20_000
+    window._plan_timer.timeout.emit()
+    assert any(y.qcds for y in window.plan_view.result.years)
+    # Switching to a withdrawal offers every amount mode again.
+    form.kind.setCurrentIndex(form.kind.findData("withdrawal"))
+    assert rule.kind == "withdrawal" and form.mode.count() == 4

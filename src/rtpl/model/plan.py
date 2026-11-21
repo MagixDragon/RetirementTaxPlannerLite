@@ -8,7 +8,8 @@ Design points (see docs/design.md, "Forward-looking plan"):
   calendar year) and shown in whatever form is convenient.
 * Accounts are individual: each spouse can have several of each type.
   The graph groups them by type unless asked to show each one.
-* Rules move money between accounts (Roth conversions, withdrawals). For
+* Rules move money between accounts (Roth conversions, withdrawals) or
+  out to charity (qualified charitable distributions). For
   each account and kind of rule, the rule with the narrowest time span
   wins in a year, so a one-year rule overrides a range rule.
 * Withdrawals happen where a rule (or an RMD) says so. Money left over
@@ -107,7 +108,21 @@ DEFAULT_SPENDING_ORDER = ("cash", "taxable")
 #   last_death   the end of the plan (the last person dies)
 WHEN_EVENTS = ("death:0", "death:1", "first_death", "last_death")
 
-RULE_KINDS = {"roth_conversion": "Roth conversion", "withdrawal": "Withdrawal"}
+RULE_KINDS = {
+    "roth_conversion": "Roth conversion",
+    "withdrawal": "Withdrawal",
+    "qcd": "Qualified charitable distribution",
+}
+
+# Qualified charitable distributions (QCDs) go straight from an IRA to a
+# charity: left out of income, counted toward the account's RMD, up to a
+# yearly limit per IRA owner (FederalLaw.qcd_limit). Only IRAs qualify:
+# traditional (including SEP and SIMPLE IRAs no longer receiving employer
+# contributions) and inherited IRAs; not 401(k)s or 403(b)s.
+QCD_KINDS = ("traditional_ira", "inherited_ira")
+# The owner must be 70 1/2 on the day of the gift. With only a birth year,
+# that is certain from the year they turn 71.
+QCD_MIN_AGE = 71
 
 # How a rule decides its amount.
 AMOUNT_MODES = {
@@ -115,6 +130,13 @@ AMOUNT_MODES = {
     "fill": "Fill up to a target",
     "spread": "Spread the balance evenly over the remaining years of the rule (1/N)",
     "all": "Take the whole balance",
+    "rmd": "The year's RMD from the account (QCDs only)",
+}
+# The amount modes each rule kind can use.
+RULE_MODES = {
+    "roth_conversion": ("fixed", "fill", "spread", "all"),
+    "withdrawal": ("fixed", "fill", "spread", "all"),
+    "qcd": ("fixed", "rmd"),
 }
 
 # Targets for "fill" rules: what to fill up to.
@@ -410,6 +432,7 @@ class Rule:
             "fill": f"fill to {self.target}",
             "spread": "spread evenly (1/N)",
             "all": "whole balance",
+            "rmd": "the RMD",
         }.get(self.mode, self.mode)
         return f"{RULE_KINDS.get(self.kind, self.kind)} from {name}, {when}, {how}"
 
@@ -536,6 +559,8 @@ class Plan:
                 problems.append(f"Rule: unknown kind {r.kind!r}")
             if r.mode not in AMOUNT_MODES:
                 problems.append(f"Rule: unknown amount mode {r.mode!r}")
+            elif r.kind in RULE_MODES and r.mode not in RULE_MODES[r.kind]:
+                problems.append(f"Rule: {RULE_KINDS[r.kind]} can't use the amount mode {r.mode!r}")
             if r.account not in ids:
                 problems.append(f"Rule: no account with id {r.account!r}")
             if r.mode == "fill" and not r.target:

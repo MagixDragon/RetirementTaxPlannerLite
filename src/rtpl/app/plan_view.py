@@ -83,7 +83,8 @@ class PlanView(QWidget):
         self.todays.setToolTip("Divide each year's amounts by inflation since the plan's first year")
         self.tax_free = QCheckBox("Show ta&x-free withdrawals")
         self.tax_free.setChecked(True)
-        self.tax_free.setToolTip("Roth, HSA and brokerage principal: money spent but not taxed")
+        self.tax_free.setToolTip("Roth, HSA and brokerage principal: money spent but not taxed;\n"
+                                 "and QCDs, given straight to charity")
         for cb in (self.detail, self.todays, self.tax_free):
             cb.toggled.connect(self.redraw)
             vlay.addWidget(cb)

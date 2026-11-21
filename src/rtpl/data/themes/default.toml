@@ -65,6 +65,7 @@ realized_gains = "#6da7ec"
 tax_exempt = "#c9c7c0"
 roth_withdrawal = "#aeaca5"
 principal = "#dddcd7"
+qcd = "#8fcfc4"
 
 [light.lines]
 bracket_low = "#898781"
@@ -89,6 +90,7 @@ realized_gains = "#2ea3c9"
 tax_exempt = "#5c5b56"
 roth_withdrawal = "#75746e"
 principal = "#45443f"
+qcd = "#2c7a70"
 
 [dark.lines]
 bracket_low = "#898781"
