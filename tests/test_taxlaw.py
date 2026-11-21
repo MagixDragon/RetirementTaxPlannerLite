@@ -150,3 +150,12 @@ def test_qcd_limits(lib):
                       2024: 105_000, 2025: 108_000, 2026: 111_000, 2027: 114_000}
     split = {y: lib.federal(y).qcd_split_interest_limit for y in (2022, 2023, 2025, 2026, 2027)}
     assert split == {2022: 0, 2023: 50_000, 2025: 54_000, 2026: 55_000, 2027: 57_000}
+
+
+def test_earnings_test_limits(lib):
+    assert lib.federal(2020).earnings_test_under_fra == 18_240
+    assert lib.federal(2026).earnings_test_under_fra == 24_480
+    assert lib.federal(2027).earnings_test_fra_year == 67_920
+    later = lib.federal(2030)
+    assert later.earnings_test_under_fra > 25_560
+    assert later.earnings_test_under_fra % 120 == 0 and later.earnings_test_fra_year % 120 == 0

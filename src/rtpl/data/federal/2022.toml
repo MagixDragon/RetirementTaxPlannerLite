@@ -58,6 +58,7 @@ threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
 [social_security]
 base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
 adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+earnings_test = { under_fra = 19560, fra_year = 51960 }
 
 [irmaa]
 # Medicare premiums paid in 2022, set by MAGI from 2020.

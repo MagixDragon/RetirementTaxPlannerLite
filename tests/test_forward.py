@@ -191,6 +191,72 @@ def test_spousal_reduced_when_early(lib):
     assert y62.category_totals()["ss"] == pytest.approx(own + spousal)
 
 
+def test_earnings_test_withholds_and_credits_back_at_fra(lib):
+    # Born 1964: full retirement age 67, reached in January 2031.
+    prof = single(birth=1964)
+    lives_to(prof, 70)
+    plan = Plan(
+        profile=prof,
+        people=[PersonPlan(social_security=SocialSecurity(fra_benefit=24_000, claim_age=62))],
+        incomes=[IncomeStream(kind="wages", amount=44_480, owner=0, end=When(year=2027))],
+        assumptions=Assumptions(ss_cola=0.0),
+    )
+    res = run_plan(plan, lib, with_lines=False)
+    by = {y.year: y for y in res.years}
+    early = 24_000 * 0.70
+    # 2026: $1 for every $2 over $24,480.
+    assert by[2026].ss_withheld == {0: pytest.approx(10_000)}
+    assert by[2026].category_totals()["ss"] == pytest.approx(early - 10_000)
+    assert any("earnings test" in n for n in by[2026].notes)
+    # 2027: the limit is $25,560.
+    assert by[2027].ss_withheld[0] == pytest.approx((44_480 - 25_560) / 2)
+    # No wages: paid in full, not yet raised.
+    assert by[2028].ss_withheld == {}
+    assert by[2030].category_totals()["ss"] == pytest.approx(early)
+    # At FRA, 7 + 6 whole months withheld (at $1,400 a month) are credited:
+    # as if claimed at 63 and 1 month (47 months early).
+    raised = 24_000 * (1 - (36 * 5 / 900 + 11 * 5 / 1200))
+    assert by[2031].category_totals()["ss"] == pytest.approx(raised)
+    assert any("raised at full retirement age for 13 months" in n for n in by[2031].notes)
+    header, rows = year_table(res)
+    assert "A SS withheld" in header
+    assert rows[0][header.index("A SS withheld")] == "10,000"
+
+
+def test_earnings_test_in_the_fra_year_counts_months_before_fra(lib):
+    # Born 1959: full retirement age 66 and 10 months, reached in November 2025.
+    prof = single(year=2025, birth=1959)
+    lives_to(prof, 68)
+    plan = Plan(
+        profile=prof,
+        people=[PersonPlan(social_security=SocialSecurity(fra_benefit=30_000, claim_age=62))],
+        incomes=[IncomeStream(kind="wages", amount=120_000, owner=0, end=When(year=2026))],
+        assumptions=Assumptions(ss_cola=0.0),
+    )
+    by = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    # $1 for every $3 of the 10 months' wages over $62,160.
+    assert by[2025].ss_withheld[0] == pytest.approx((100_000 - 62_160) / 3)
+    assert by[2026].ss_withheld == {}  # past full retirement age: no limit
+
+
+def test_earnings_test_reaches_the_spousal_top_up(lib):
+    prof = couple(births=(1964, 1964))
+    lives_to(prof, 63)
+    plan = Plan(
+        profile=prof,
+        people=[
+            PersonPlan(social_security=SocialSecurity(fra_benefit=40_000, claim_age=62)),
+            PersonPlan(social_security=SocialSecurity(fra_benefit=0, claim_age=62)),
+        ],
+        incomes=[IncomeStream(kind="wages", amount=200_000, owner=0)],
+        assumptions=Assumptions(ss_cola=0.0),
+    )
+    y = run_plan(plan, lib, with_lines=False).years[0]
+    # A's wages withhold A's own check and then B's spousal benefit, paid on A's record.
+    assert y.ss_withheld == {0: pytest.approx(28_000), 1: pytest.approx(13_000)}
+    assert y.category_totals()["ss"] == 0
+
+
 def test_deficit_sells_brokerage_and_realizes_gains(lib):
     prof = single(birth=1960)
     lives_to(prof, 68)

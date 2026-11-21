@@ -69,6 +69,11 @@ threshold = { single = 200000, mfj = 250000, mfs = 125000, hoh = 200000 }
 # mfs assumes the couple lived together during the year (base 0).
 base     = { single = 25000, mfj = 32000, mfs = 0, hoh = 25000 }
 adjusted = { single = 34000, mfj = 44000, mfs = 0, hoh = 34000 }
+# Retirement earnings test (SSA's annual exempt amounts). Before the year
+# of full retirement age, $1 of benefits is withheld for every $2 of
+# wages over under_fra; in that year, $1 for every $3 over fra_year,
+# counting only the months before full retirement age.
+earnings_test = { under_fra = 23400, fra_year = 62160 }
 
 [irmaa]
 # Medicare premiums paid in 2025, set by MAGI from 2023 (two-year lookback).
