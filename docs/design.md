@@ -380,12 +380,13 @@ means it stops applying once the plan starts in a later year.
    over SSA's lower limit; in the year FRA is reached, $1 for every $3 over
    the higher limit, counting only the months before FRA. The limits are in
    each federal year file (`earnings_test`) and grow with inflation after
-   the last one, standing in for wage growth. What a person's wages
-   withhold comes first from their own check (own, spousal or survivor
-   benefit), then from the spouse's spousal top-up, which is paid on their
-   record. Whole months withheld are credited back: from FRA the own
-   benefit (and spousal top-up) is recomputed as if claimed that many
-   months later. The year table's *SS withheld* column and the notes show
+   the last one, standing in for wage growth. A person's wages withhold
+   their own check (own, spousal or survivor benefit) and the spouse's
+   spousal top-up, which is paid on their record, in the same months, as
+   SSA withholds whole months of the family's checks together. The spouse's
+   own benefit is not touched by them. Whole months withheld are credited
+   back at each person's own FRA: the own benefit (and spousal top-up) is
+   recomputed as if claimed that many months later. The year table's *SS withheld* column and the notes show
    both. SSDI is left out (it has its own work rules), and pensions, IRA
    withdrawals and investment income never count.
 5. **Rules.** Fixed, spread and whole-balance rules first, then fill rules

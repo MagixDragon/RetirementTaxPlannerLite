@@ -437,10 +437,10 @@ class PlanEngine:
 
         $1 for every $2 over the lower limit before the year full retirement
         age is reached; $1 for every $3 over the higher limit in that year,
-        counting only the wages and benefits of the months before it. What a
-        person's wages withhold comes first from their own check, then from
-        a spouse's spousal top-up (it is paid on their record). Whole months
-        withheld are credited back at full retirement age."""
+        counting only the wages and benefits of the months before it. A
+        person's wages withhold their own check and a spouse's spousal
+        top-up (it is paid on their record) in the same months. Whole months
+        withheld are credited back at each one's full retirement age."""
         people = self.profile.people
         for i in list(paid):
             ss = self.plan.people[i].social_security
@@ -457,35 +457,42 @@ class PlanEngine:
             due = max(0.0, wages - limit) / per
             if due <= 0:
                 continue
-            due_total = due
-            # From their own check (own benefit, spousal top-up or survivor benefit).
+            # The checks paid on this person's record in the months before
+            # full retirement age: their own check (own benefit, spousal
+            # top-up or survivor benefit) and the spouse's spousal top-up.
+            # SSA withholds whole months of the family's checks together, so
+            # each gives up the same share of its months.
+            j = 1 - i if len(people) == 2 else None
             s = start_month.get(i, 0)
-            before = max(0, months - s) / (12 - s)
-            rate = paid[i] / (12 - s)  # monthly
-            take = min(due, paid[i] * before)
+            avail_i = paid[i] * max(0, months - s) / (12 - s)
+            rate_i = paid[i] / (12 - s)  # monthly
+            avail_j = rate_j = 0.0
+            if j is not None and spousal_paid.get(j, 0) > 0 and paid.get(j, 0) > 0:
+                sj = start_month.get(j, 0)
+                avail_j = min(spousal_paid[j] * max(0, months - sj) / (12 - sj), paid[j])
+                rate_j = spousal_paid[j] / (12 - sj)
+            pool = avail_i + avail_j
+            if pool <= 0:
+                continue
+            share = min(1.0, due / pool)
+            take = avail_i * share
             if take > 0:
                 paid[i] -= take
-                due -= take
                 self.ss_withheld[i] = self.ss_withheld.get(i, 0.0) + take
-                whole = int(take / rate + 1e-6) if rate > 0 else 0
+                whole = int(take / rate_i + 1e-6) if rate_i > 0 else 0
                 if i not in survivor:
                     self._credit_own[i] = self._credit_own.get(i, 0) + whole
                     if spousal_paid.get(i):
                         self._credit_spousal[i] = self._credit_spousal.get(i, 0) + whole
-            # Then from the spouse's spousal top-up, paid on this person's record.
-            j = 1 - i if len(people) == 2 else None
-            if due > 0 and j is not None and spousal_paid.get(j, 0) > 0 and paid.get(j, 0) > 0:
-                sj = start_month.get(j, 0)
-                share = max(0, months - sj) / (12 - sj)
-                take_j = min(due, spousal_paid[j] * share, paid[j])
-                if take_j > 0:
-                    paid[j] -= take_j
-                    spousal_paid[j] -= take_j
-                    self.ss_withheld[j] = self.ss_withheld.get(j, 0.0) + take_j
-                    rate_j = (spousal_paid[j] + take_j) / (12 - sj)
-                    whole = int(take_j / rate_j + 1e-6) if rate_j > 0 else 0
-                    self._credit_spousal[j] = self._credit_spousal.get(j, 0) + whole
-            took = due_total - due
+            take_j = avail_j * share
+            if take_j > 0:
+                paid[j] -= take_j
+                spousal_paid[j] -= take_j
+                self.ss_withheld[j] = self.ss_withheld.get(j, 0.0) + take_j
+                whole = int(take_j / rate_j + 1e-6) if rate_j > 0 else 0
+                # Credited at the spouse's own full retirement age.
+                self._credit_spousal[j] = self._credit_spousal.get(j, 0) + whole
+            took = take + take_j
             if took > 0.5:
                 self.ss_notes.append(
                     f"{people[i].name}: ${took:,.0f} of Social Security withheld under the earnings test "

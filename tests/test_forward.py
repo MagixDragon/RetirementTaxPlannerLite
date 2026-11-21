@@ -257,6 +257,35 @@ def test_earnings_test_reaches_the_spousal_top_up(lib):
     assert y.category_totals()["ss"] == 0
 
 
+def test_earnings_test_shares_months_with_the_spouse_and_credits_each_at_their_fra(lib):
+    # A (born 1964, FRA in 2031) works; B (born 1963, FRA in 2030) is on a
+    # spousal benefit from A's record. Both filed in 2026.
+    prof = couple(births=(1964, 1963))
+    lives_to(prof, 68)
+    own_a = 40_000 * 0.70
+    spousal_b = 20_000 * (1 - (36 * 25 / 3600 + 12 * 5 / 1200))  # started at 63
+    due = (own_a + spousal_b) / 2  # half of the family's checks
+    plan = Plan(
+        profile=prof,
+        people=[
+            PersonPlan(social_security=SocialSecurity(fra_benefit=40_000, claim_age=62)),
+            PersonPlan(social_security=SocialSecurity(fra_benefit=0, claim_age=63)),
+        ],
+        incomes=[IncomeStream(kind="wages", amount=24_480 + 2 * due, owner=0, end=When(year=2026))],
+        assumptions=Assumptions(ss_cola=0.0),
+    )
+    by = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    # Six months of each check are withheld, not A's first.
+    assert by[2026].ss_withheld == {0: pytest.approx(own_a / 2), 1: pytest.approx(spousal_b / 2)}
+    assert by[2029].category_totals()["ss"] == pytest.approx(own_a + spousal_b)
+    # B's spousal benefit is raised at B's FRA (as if started at 63 and 6 months) ...
+    spousal_b_raised = 20_000 * (1 - (36 * 25 / 3600 + 6 * 5 / 1200))
+    assert by[2030].category_totals()["ss"] == pytest.approx(own_a + spousal_b_raised)
+    # ... and A's own benefit at A's FRA (as if claimed at 62 and 6 months).
+    own_a_raised = 40_000 * (1 - (36 * 5 / 900 + 18 * 5 / 1200))
+    assert by[2031].category_totals()["ss"] == pytest.approx(own_a_raised + spousal_b_raised)
+
+
 def test_deficit_sells_brokerage_and_realizes_gains(lib):
     prof = single(birth=1960)
     lives_to(prof, 68)
