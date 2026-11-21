@@ -281,13 +281,51 @@ final balances.
 | Social Security (per person) | benefit at full retirement age (today's dollars), claiming age (years and months), or the benefit already being paid; SSDI, with an optional early end age (a claiming age past FRA suspends SSDI's retirement benefit until then) |
 | Person (on the baseline) | birth year, life expectancy (default 95) |
 | Assumptions | Social Security COLA (default: inflation), default return and cash return (nominal, before inflation; every cash account earns the cash return), yearly spending (today's dollars), spending after the first death (% of the couple's), the spending order, MAGI for the two years before the plan (for IRMAA) |
-| Rule | Roth conversion or withdrawal, from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance. A fixed amount can stay flat, grow with inflation (entered in today's dollars) or grow by a fixed % a year after the rule's first year (negative for a glide path down) |
+| Rule | Roth conversion, withdrawal or qualified charitable distribution (QCD), from one account, over a span of years; amount: fixed, fill to a target (top of a bracket, top of the 0% gains band, under an IRMAA tier, an ACA % of the poverty line, or a MAGI), spread the balance evenly over the rule's remaining years (1/N; on a 10-year-rule inherited IRA the rule stops at the deadline and N counts to it), or the whole balance. A fixed amount can stay flat, grow with inflation (entered in today's dollars) or grow by a fixed % a year after the rule's first year (negative for a glide path down). A QCD takes a fixed amount or the year's RMD from the account |
 
 **Overrides.** For each account and kind of rule, the rule with the
 narrowest span wins in a year (ties go to the later rule). So "fill to 22%,
 ages 63 to 70" plus "2031: convert $0" skips one year without splitting
 the range. A withdrawal rule's amount is the year's total from that
 account, so an RMD counts toward it; conversions come on top of RMDs.
+
+**Qualified charitable distributions.** A QCD rule gives money straight
+from an IRA to a charity (IRC 408(d)(8)):
+
+* Only traditional and inherited IRAs qualify (a SEP or SIMPLE IRA only
+  once the employer has stopped contributing, which the plan can't tell,
+  so it is up to the user); not 401(k)s or 403(b)s, which have to be
+  rolled into an IRA first. Roth IRAs are not offered: a QCD from one
+  saves nothing.
+* The owner (for an inherited IRA, the beneficiary) must be 70½ on the
+  day of the gift. With only birth years, QCDs start in the year the
+  person turns 71; someone born January to June could start late in the
+  year they turn 70.
+* Each IRA owner has a yearly limit, shared by all of their IRAs:
+  $100,000 to 2023, then indexed ($105,000 in 2024, $108,000 in 2025,
+  $111,000 in 2026, $114,000 in 2027), in `[qcd]` in each federal year
+  file and grown with inflation (rounded down to $1,000) when projected.
+  Rules are filled in list order; a capped QCD gets a note.
+* A QCD is left out of income entirely (no AGI, so it also leaves Social
+  Security taxation, IRMAA and the ACA alone), and can't also be deducted.
+* It counts toward the RMD of the account it comes from: QCDs are taken
+  first, and only the rest of that account's RMD is taxed. An "RMD" QCD
+  gives exactly that account's RMD (none in a first year whose RMD was
+  already taken). RMDs are still worked out per account; once a person's
+  IRA RMDs are aggregated, their QCD total comes off the combined RMD
+  instead, and the QCD amounts per account (`YearResult.qcds`) stay as
+  they are.
+* The money goes to charity, not the household: it is not part of income
+  or net cash flow, and doesn't count toward a withdrawal rule's amount.
+  If the spending assumption includes gifts made by QCD, lower it. On the
+  graph QCDs are a tax-free segment (shown with the other tax-free
+  segments), and the year table has a QCD column per account.
+* Not modelled: the SECURE 2.0 one-time QCD to a charitable gift annuity
+  or charitable remainder trust (from 2023; $55,000 in 2026 and $57,000 in
+  2027, inside the yearly limit; stored as `split_interest_limit`), whose
+  payments can be entered as an annuity income stream; and the reduction
+  of the excludable QCD by deductible IRA contributions made after 70½
+  (the plan has no IRA contributions).
 
 **RMD already taken.** A plan started mid-year can mark a traditional or
 inherited account's RMD as already taken for the first year
@@ -300,7 +338,8 @@ means it stops applying once the plan starts in a later year.
 
 1. Accounts of someone who died the year before pass to the survivor
    (spousal rollover).
-2. **RMDs.** Traditional accounts from 73 (born 1951–59) or 75 (born
+2. **QCDs, then RMDs.** QCD rules first (see above), each counting toward
+   its account's RMD. RMDs: traditional accounts from 73 (born 1951–59) or 75 (born
    1960+), using the Uniform Lifetime table, or the Joint and Last
    Survivor table when the spouse is the sole beneficiary and more than 10
    years younger. Inherited IRAs: yearly RMDs from the Single Life table

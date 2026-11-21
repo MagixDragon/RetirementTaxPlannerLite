@@ -135,6 +135,10 @@ class FederalLaw:
     aca_medicaid_pct: float
     aca_csr_pct: float
     aca_cliff_pct: float
+    # Qualified charitable distributions: yearly limit per IRA owner, and
+    # the one-time split-interest gift (inside that limit; 0 before 2023).
+    qcd_limit: float = 100_000.0
+    qcd_split_interest_limit: float = 0.0
     projected_from: int | None = None
     inflation_used: float | None = None
 
@@ -197,6 +201,8 @@ def _parse_federal(raw: dict) -> FederalLaw:
         aca_medicaid_pct=float(aca["medicaid_expansion_pct"]),
         aca_csr_pct=float(aca["csr_limit_pct"]),
         aca_cliff_pct=float(aca["subsidy_cliff_pct"]),
+        qcd_limit=float(raw.get("qcd", {}).get("annual_limit", 100_000)),
+        qcd_split_interest_limit=float(raw.get("qcd", {}).get("split_interest_limit", 0)),
     )
 
 
@@ -458,6 +464,11 @@ class TaxLawLibrary:
             raw["aca"]["fpl_each_additional"] = _round_down(
                 raw["aca"]["fpl_each_additional"] * factor, step
             )
+        if "qcd_limits" in idx and "qcd" in raw:
+            step = idx["qcd_limits"]
+            for k in ("annual_limit", "split_interest_limit"):
+                if k in raw["qcd"]:
+                    raw["qcd"][k] = _round_down(raw["qcd"][k] * factor, step)
         for flag, last in sunsets.items():
             if year > int(last):
                 raw.setdefault("policy", {})[flag] = False

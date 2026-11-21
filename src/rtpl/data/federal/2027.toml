@@ -84,3 +84,12 @@ fpl_each_additional = 5680
 medicaid_expansion_pct = 1.38
 csr_limit_pct = 2.50
 subsidy_cliff_pct = 4.00
+
+[qcd]
+# Qualified charitable distributions (IRC 408(d)(8)): the most each IRA
+# owner aged 70 1/2 or older can give from their IRAs tax-free this year.
+# Indexed for inflation (IRS Notice 2026-66).
+annual_limit = 114000
+# SECURE 2.0 one-time gift to a charitable gift annuity or remainder
+# trust (from 2023; inside the annual limit). 0 = not yet allowed.
+split_interest_limit = 57000

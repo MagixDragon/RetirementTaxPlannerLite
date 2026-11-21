@@ -3,10 +3,12 @@
 Each year:
 
 1. Accounts owned by someone who died last year pass to the survivor.
-2. Required distributions: RMDs from traditional accounts (Uniform
-   Lifetime, or Joint and Last Survivor for a much younger spouse), and
-   inherited IRA RMDs (Single Life) plus emptying in the 10-year deadline
-   year.
+2. Qualified charitable distributions (QCDs) go from IRAs straight to
+   charity, within each owner's yearly limit. Then required distributions:
+   RMDs from traditional accounts (Uniform Lifetime, or Joint and Last
+   Survivor for a much younger spouse), and inherited IRA RMDs (Single
+   Life) plus emptying in the 10-year deadline year. A QCD counts toward
+   the RMD of the account it comes from, so only the rest is taxed.
 3. Income streams (wages, pensions, one-off gains), Social Security (own,
    spousal and survivor benefits) and taxable-account yields.
 4. Rules: Roth conversions and withdrawals, fixed amounts first, then
@@ -35,7 +37,7 @@ import copy
 import math
 from dataclasses import dataclass, field
 
-from rtpl.model.plan import ROTH_KINDS, TRADITIONAL_KINDS, Account, Plan, Rule
+from rtpl.model.plan import QCD_KINDS, QCD_MIN_AGE, ROTH_KINDS, TRADITIONAL_KINDS, Account, Plan, Rule
 from rtpl.model.profile import Household, Person, Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
@@ -60,8 +62,12 @@ CATEGORIES = (
     "tax_exempt",
     "roth_withdrawal",
     "principal",
+    "qcd",
 )
-TAX_FREE = ("tax_exempt", "roth_withdrawal", "principal")
+TAX_FREE = ("tax_exempt", "roth_withdrawal", "principal", "qcd")
+# Money that leaves the household (QCDs go to charity): drawn on the graph
+# but not part of the household's income.
+NOT_INCOME = ("qcd",)
 # Taxed at capital gains rates, stacked above ordinary income. Dividends and
 # fund distributions come whether you want them or not; realized gains are
 # from sales you choose (or that pay for a shortfall) and one-off gains.
@@ -81,6 +87,7 @@ CATEGORY_LABELS = {
     "tax_exempt": "Tax-exempt interest",
     "roth_withdrawal": "Roth and HSA withdrawals (tax-free)",
     "principal": "Brokerage and cash principal (tax-free)",
+    "qcd": "Qualified charitable distributions (to charity, not taxed)",
 }
 
 
@@ -114,6 +121,9 @@ class YearResult:
     rmds: dict[str, float] = field(default_factory=dict)
     conversions: dict[str, float] = field(default_factory=dict)
     withdrawals: dict[str, float] = field(default_factory=dict)
+    # Qualified charitable distributions (account id -> amount). They count
+    # toward the account's RMD, so ``rmds`` holds only the taxable rest.
+    qcds: dict[str, float] = field(default_factory=dict)
     # Income and Social Security received, less spending, tax and IRMAA
     # surcharges: a surplus is saved; a deficit is taken from the spending
     # order, and what that can't cover is the shortfall.
@@ -137,7 +147,8 @@ class YearResult:
 
     @property
     def total_income(self) -> float:
-        return sum(s.amount for s in self.sources)
+        """The household's income (QCDs go to charity, so they are left out)."""
+        return sum(s.amount for s in self.sources if s.category not in NOT_INCOME)
 
 
 @dataclass
@@ -263,6 +274,7 @@ class PlanEngine:
         self.deadlines: dict[str, int | None] = {a.id: a.deadline_year(plan.profile) for a in plan.accounts}
         self.inherited_rules = {a.id: a.inherited_rule(plan.profile) for a in plan.accounts}
         self._taken_before: dict[str, float] = {}
+        self._qcd: dict[str, float] = {}
 
     # -- people ----------------------------------------------------------
     def alive(self, i: int, year: int) -> bool:
@@ -567,6 +579,7 @@ class PlanEngine:
             # this year, but not taken from the balance again.
             self._taken_before: dict[str, float] = {}
             notes: list[str] = notes_next
+            active = _active_rules(plan.rules, profile, year)
 
             def take_from(acct: Account, amount: float, category: str, label: str) -> float:
                 amount = max(0.0, min(amount, bal[acct.id] - withdrawn[acct.id]))
@@ -581,9 +594,12 @@ class PlanEngine:
                     sources.append(Source("roth_withdrawal", f"roth_withdrawal:{acct.id}", label, amount))
                 return amount
 
-            # 2. required distributions
+            # 2. QCDs, then required distributions (less the QCD from that account)
+            reqs = {a.id: self.required_distribution(a, bal[a.id], year, first_periods) for a in accounts}
+            self._qcd = self._apply_qcds([r for r in active if r.kind == "qcd"], year, by_id, bal, withdrawn,
+                                         reqs, labels, law, sources, notes)
             for a in accounts:
-                req = self.required_distribution(a, bal[a.id], year, first_periods)
+                req = reqs[a.id]
                 if req > 0:
                     cat = "inherited" if a.kind == "inherited_ira" else "rmd"
                     what = "required withdrawal" if a.kind == "inherited_ira" else "RMD"
@@ -597,7 +613,11 @@ class PlanEngine:
                         self._taken_before[a.id] = taken
                         rmds[a.id] = taken
                         continue
-                    rmds[a.id] = take_from(a, req, cat, f"{labels[a.id]} {what}")
+                    # A QCD counts toward this account's RMD. (When RMDs are
+                    # aggregated across a person's IRAs, the person's QCD
+                    # total would come off their combined RMD instead.)
+                    rmds[a.id] = take_from(a, max(0.0, req - self._qcd.get(a.id, 0.0)), cat,
+                                           f"{labels[a.id]} {what}")
                     if self.deadlines.get(a.id) == year:
                         notes.append(f"{labels[a.id]}: deadline year, remaining balance withdrawn")
 
@@ -668,9 +688,10 @@ class PlanEngine:
 
             # 4. rules: fixed, spread and all first, then fill rules
             conversions: dict[str, tuple[str, float]] = {}
-            active = _active_rules(plan.rules, profile, year)
             fills = []
             for r in active:
+                if r.kind == "qcd":
+                    continue  # applied with the RMDs
                 if r.mode == "fill":
                     fills.append(r)
                     continue
@@ -761,7 +782,8 @@ class PlanEngine:
             for key, (_dest, amount) in conversions.items():
                 src = key.split("->", 1)[0]
                 converted[src] = converted.get(src, 0.0) + amount
-            other_out = {k: v - rmds.get(k, 0.0) - converted.get(k, 0.0) for k, v in withdrawn.items()}
+            other_out = {k: v - rmds.get(k, 0.0) - converted.get(k, 0.0) - self._qcd.get(k, 0.0)
+                         for k, v in withdrawn.items()}
             other_out.update({k: v + self._taken_before.get(k, 0.0) for k, v in other_out.items()
                               if k in self._taken_before})
             marginal = (compute_tax(prof, law, self.state_law, extra=1000.0).total_tax - tax.total_tax) / 1000.0
@@ -782,6 +804,7 @@ class PlanEngine:
                 rmds={k: v for k, v in rmds.items() if v > 0.005},
                 conversions={k: v for k, v in converted.items() if v > 0.005},
                 withdrawals={k: v for k, v in other_out.items() if v > 0.005},
+                qcds={k: v for k, v in self._qcd.items() if v > 0.005},
                 net_cash_flow=net,
                 marginal_rate=marginal,
                 gains_by_rate=_gains_by_rate(tax, law, fs),
@@ -810,7 +833,9 @@ class PlanEngine:
         # A withdrawal rule's amount is the year's total from that account, so
         # an RMD already taken counts toward it (RMDs are a floor, not extra).
         # Conversions come on top of any RMD, which cannot be converted.
-        already = withdrawn[acct.id] + self._taken_before.get(acct.id, 0.0) if r.kind == "withdrawal" else 0.0
+        # QCDs went to charity, so they don't count toward a withdrawal.
+        already = (withdrawn[acct.id] + self._taken_before.get(acct.id, 0.0) - self._qcd.get(acct.id, 0.0)
+                   if r.kind == "withdrawal" else 0.0)
         if r.mode == "fixed":
             amount = r.fixed_amount(self.plan, year) - already
         elif r.mode == "spread":
@@ -867,6 +892,54 @@ class PlanEngine:
             return
         cat = "inherited" if acct.kind == "inherited_ira" else "ira_withdrawal"
         take_from(acct, amount, cat, f"{labels[acct.id]} withdrawal")
+
+    def _apply_qcds(self, rules: list[Rule], year, by_id, bal, withdrawn, reqs, labels, law,
+                    sources, notes) -> dict[str, float]:
+        """Give each QCD rule's amount to charity, in rule order. Returns
+        the QCD from each account (account id -> amount).
+
+        Each IRA owner has their own yearly limit, shared by all of their
+        IRAs. A QCD is never taxed: it is left out of the return entirely.
+        A first-year RMD already taken (before the plan) can't be replaced,
+        so an "RMD" QCD gives nothing that year.
+        """
+        out: dict[str, float] = {}
+        used: dict[int, float] = {}
+        people = self.profile.people
+        for r in rules:
+            acct = by_id.get(r.account)
+            if acct is None:
+                continue
+            if acct.kind not in QCD_KINDS:
+                notes.append(f"QCDs come from traditional or inherited IRAs only ({labels[acct.id]}); "
+                             "roll a 401(k) or 403(b) into an IRA first")
+                continue
+            if acct.owner is None:
+                continue
+            person = people[acct.owner]
+            if person.age_in(year) < QCD_MIN_AGE:
+                if person.age_in(year) == QCD_MIN_AGE - 1:
+                    notes.append(f"{person.name}: QCDs start the year they turn {QCD_MIN_AGE} "
+                                 "(70½ during the year)")
+                continue
+            if r.mode == "rmd":
+                if year == self.plan.start_year and self.plan.rmd_taken_now(acct):
+                    continue
+                want = reqs.get(acct.id, 0.0)
+            else:
+                want = r.fixed_amount(self.plan, year)
+            room = max(0.0, law.qcd_limit - used.get(acct.owner, 0.0))
+            amount = max(0.0, min(want, room, bal[acct.id] - withdrawn[acct.id]))
+            if want > room + 0.5:
+                notes.append(f"{labels[acct.id]}: QCD capped at {person.name}'s {year} limit of "
+                             f"${law.qcd_limit:,.0f}")
+            if amount <= 0:
+                continue
+            withdrawn[acct.id] += amount
+            used[acct.owner] = used.get(acct.owner, 0.0) + amount
+            out[acct.id] = out.get(acct.id, 0.0) + amount
+            sources.append(Source("qcd", f"qcd:{acct.id}", f"{labels[acct.id]} QCD", amount))
+        return out
 
     def _cover_deficit(self, deficit: float, accounts, bal, withdrawn, basis):
         """Take a deficit from the account types in the spending order, each
@@ -1102,11 +1175,16 @@ TABLE_COLUMNS: tuple[TableColumn, ...] = (
                 "in the spending order."),
     TableColumn("shortfall", "Shortfall", False, "Spending and tax the spending order could not cover"),
     TableColumn("rmds", "RMDs by account", False,
-                "RMDs and required inherited IRA withdrawals,\none column per account"),
+                "RMDs and required inherited IRA withdrawals, less any QCD\n"
+                "from the account, one column per account"),
     TableColumn("conversions", "Roth conversions by account", False, "One column per account converted from"),
     TableColumn("withdrawals", "Other withdrawals by account", False,
                 "Withdrawal rules, and sales or withdrawals that pay for spending,\n"
                 "one column per account"),
+    TableColumn("qcds", "QCDs by account", True,
+                "Qualified charitable distributions: given straight to charity,\n"
+                "not taxed, and counted toward the account's RMD.\n"
+                "Shown only when the plan has some."),
     TableColumn("balances", "Balances by account", False, "Each account's balance at the end of the year"),
     TableColumn("total_balances", "Total balances", True, "All accounts at the end of the year"),
     TableColumn("notes", "Notes", True),
@@ -1201,10 +1279,10 @@ def table_data(result: PlanResult, *, todays_dollars: bool = False, columns: lis
             money_col("Net cash flow", c.tip, lambda yr: yr.net_cash_flow)
         elif k == "shortfall":
             money_col("Shortfall", c.tip, lambda yr: yr.shortfall)
-        elif k in ("rmds", "conversions", "withdrawals", "balances"):
+        elif k in ("rmds", "conversions", "withdrawals", "qcds", "balances"):
             attr = "balances_end" if k == "balances" else k
             word = {"rmds": "RMD", "conversions": "conversion", "withdrawals": "withdrawals",
-                    "balances": "balance"}[k]
+                    "qcds": "QCD", "balances": "balance"}[k]
             ids = account_ids(attr)
             if k == "balances":
                 ids = [i for i in ids if any(yr.balances_end.get(i, 0) > 0.5 or yr.balances_start.get(i, 0) > 0.5

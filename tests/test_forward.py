@@ -642,3 +642,120 @@ def test_rmd_already_taken_counts_as_income_but_not_twice(lib):
         Account(id="ira", kind="traditional_ira", balance=1_000_000, rmd_taken_year=2026)])
     y0 = run_plan(plan, lib, with_lines=False).years[0]
     assert y0.balances_end["ira"] < 1_000_000 * 1.05
+
+
+# -- qualified charitable distributions ---------------------------------------------
+
+
+def qcd_plan(prof, rules, accounts=None, **assumptions):
+    accounts = accounts or [Account(id="ira", kind="traditional_ira", balance=1_000_000)]
+    return Plan(profile=prof, accounts=accounts, rules=rules, assumptions=Assumptions(**assumptions))
+
+
+def test_qcd_of_the_whole_rmd_is_not_taxed(lib):
+    prof = single()  # age 75 in 2026
+    lives_to(prof, 76)
+    rmd = 1_000_000 / 24.6
+    plan = qcd_plan(prof, [Rule(kind="qcd", account="ira", start=When(year=2026), end=When(year=2027), mode="rmd")])
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.qcds == {"ira": pytest.approx(rmd)}
+    assert y0.rmds == {}  # the QCD satisfied the RMD
+    assert y0.category_totals()["rmd"] == 0 and y0.category_totals()["qcd"] == pytest.approx(rmd)
+    assert y0.tax.agi == pytest.approx(0.0)
+    assert y0.total_income == pytest.approx(0.0)  # it went to charity, not to the household
+    assert y0.net_cash_flow == pytest.approx(0.0)
+    assert y0.balances_end["ira"] == pytest.approx((1_000_000 - rmd) * 1.05)
+
+
+def test_qcd_counts_toward_the_rmd_and_the_rest_is_taxed(lib):
+    prof = single()
+    lives_to(prof, 75)
+    rmd = 1_000_000 / 24.6
+    base = run_plan(qcd_plan(prof, []), lib, with_lines=False).years[0]
+    plan = qcd_plan(prof, [Rule(kind="qcd", account="ira", start=When(year=2026), amount=10_000)])
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.qcds["ira"] == pytest.approx(10_000)
+    assert y0.rmds["ira"] == pytest.approx(rmd - 10_000)
+    assert y0.tax.agi == pytest.approx(base.tax.agi - 10_000)
+    assert y0.withdrawals == {}
+    # Same money out of the account as the RMD alone.
+    assert y0.balances_end["ira"] == pytest.approx(base.balances_end["ira"])
+
+    # A QCD larger than the RMD: no taxable RMD, and the extra also leaves the account.
+    plan.rules[0].amount = 60_000
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    assert y0.rmds == {} and y0.qcds["ira"] == pytest.approx(60_000)
+    assert y0.balances_end["ira"] == pytest.approx((1_000_000 - 60_000) * 1.05)
+
+
+def test_qcd_does_not_count_toward_a_withdrawal_rule(lib):
+    prof = single()
+    lives_to(prof, 75)
+    rmd = 1_000_000 / 24.6
+    plan = qcd_plan(prof, [Rule(kind="qcd", account="ira", start=When(year=2026), amount=10_000),
+                           Rule(kind="withdrawal", account="ira", start=When(year=2026), amount=60_000)])
+    y0 = run_plan(plan, lib, with_lines=False).years[0]
+    taxable = y0.category_totals()["rmd"] + y0.category_totals()["ira_withdrawal"]
+    assert taxable == pytest.approx(60_000)  # the withdrawal is spendable money; the QCD is on top
+    assert y0.rmds["ira"] == pytest.approx(rmd - 10_000)
+    assert y0.qcds["ira"] == pytest.approx(10_000)
+
+
+def test_qcd_limits_by_year_and_person(lib):
+    prof = couple(births=(1950, 1952))
+    lives_to(prof, 90)
+    accounts = [Account(id="a1", kind="traditional_ira", owner=0, balance=2_000_000),
+                Account(id="a2", kind="inherited_ira", owner=0, balance=500_000, inherited_year=2010,
+                        original_owner_birth_year=1925),
+                Account(id="b1", kind="traditional_ira", owner=1, balance=2_000_000)]
+    rules = [Rule(kind="qcd", account=a, start=When(year=2026), end=When(year=2029), amount=80_000)
+             for a in ("a1", "a2", "b1")]
+    plan = qcd_plan(prof, rules, accounts)
+    years = {y.year: y for y in run_plan(plan, lib, with_lines=False).years}
+    # A's two IRAs share A's limit; B has a limit of their own.
+    assert years[2026].qcds["a1"] == pytest.approx(80_000)
+    assert years[2026].qcds["a2"] == pytest.approx(111_000 - 80_000)
+    assert years[2026].qcds["b1"] == pytest.approx(80_000)
+    assert sum(v for k, v in years[2027].qcds.items() if k.startswith("a")) == pytest.approx(114_000)
+    assert any("limit of $111,000" in n for n in years[2026].notes)
+    # Projected years grow with inflation and round down to $1,000.
+    law2028 = lib.federal(2028, plan.inflation)
+    assert law2028.qcd_limit == 114_000 * (1 + plan.inflation) // 1000 * 1000
+    assert sum(v for k, v in years[2028].qcds.items() if k.startswith("a")) == pytest.approx(law2028.qcd_limit)
+
+
+def test_qcd_age_and_account_rules(lib):
+    prof = single(birth=1956)  # 70 in 2026, 71 in 2027
+    lives_to(prof, 72)
+    accounts = [Account(id="ira", kind="traditional_ira", balance=500_000),
+                Account(id="k", kind="401k", balance=500_000),
+                Account(id="roth", kind="roth_ira", balance=100_000)]
+    rules = [Rule(kind="qcd", account=a, start=When(year=2026), end=When(year=2027), amount=5_000)
+             for a in ("ira", "k", "roth")]
+    years = {y.year: y for y in run_plan(qcd_plan(prof, rules, accounts), lib, with_lines=False).years}
+    assert years[2026].qcds == {}
+    assert any("turn 71" in n for n in years[2026].notes)
+    assert years[2027].qcds == {"ira": pytest.approx(5_000)}  # not the 401(k) or the Roth IRA
+    assert any("traditional or inherited IRAs only" in n for n in years[2027].notes)
+
+
+def test_qcd_rules_validate_their_amount_mode():
+    prof = single()
+    plan = qcd_plan(prof, [Rule(kind="qcd", account="ira", start=When(year=2026), mode="fill", target="cg0")])
+    assert any("can't use the amount mode" in p for p in plan.validate())
+    plan.rules[0].mode = "rmd"
+    assert plan.validate() == []
+    assert "Qualified charitable distribution from" in plan.rules[0].describe(prof, {a.id: a for a in plan.accounts})
+
+
+def test_qcd_year_table_column(lib):
+    prof = single()
+    lives_to(prof, 76)
+    plan = qcd_plan(prof, [Rule(kind="qcd", account="ira", start=When(year=2026), end=When(year=2027), mode="rmd")])
+    res = run_plan(plan, lib, with_lines=False)
+    header, rows = year_table(res)
+    assert "Traditional IRA QCD" in " ".join(header)
+    assert "Qualified charitable distributions (to charity, not taxed)" in header
+    # Without QCDs there is no QCD column.
+    header, _ = year_table(run_plan(qcd_plan(prof, []), lib, with_lines=False))
+    assert not any("QCD" in h for h in header)

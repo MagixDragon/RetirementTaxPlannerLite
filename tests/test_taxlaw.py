@@ -142,3 +142,11 @@ def test_2020_tax_for_a_retired_couple(lib):
     taxable = 60_000 + 25_500 - 27_400
     assert r.taxable_income == pytest.approx(taxable)
     assert r.ordinary_tax == pytest.approx(1_975 + 0.12 * (taxable - 19_750))
+
+
+def test_qcd_limits(lib):
+    limits = {y: lib.federal(y).qcd_limit for y in range(2020, 2028)}
+    assert limits == {2020: 100_000, 2021: 100_000, 2022: 100_000, 2023: 100_000,
+                      2024: 105_000, 2025: 108_000, 2026: 111_000, 2027: 114_000}
+    split = {y: lib.federal(y).qcd_split_interest_limit for y in (2022, 2023, 2025, 2026, 2027)}
+    assert split == {2022: 0, 2023: 50_000, 2025: 54_000, 2026: 55_000, 2027: 57_000}

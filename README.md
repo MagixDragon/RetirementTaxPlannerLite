@@ -90,7 +90,7 @@ In the app, use **File > Open Plan** (try
 `examples/plans/couple_conversions_inherited.json`) or **File > New Plan
 from Profile**, then the **Forward plan** tab. The left panel's **Plan
 items** tab lists the accounts, income, Social Security, strategies (Roth
-conversions and withdrawals) and assumptions, each with a bar for the
+conversions, withdrawals and qualified charitable distributions) and assumptions, each with a bar for the
 years it covers, under a **Plan name** for this version of the plan ("Roth
 conversions until Social Security"). Select one to change it in the form below the list, add
 or delete items, or untick one to see the plan without it; the graph and

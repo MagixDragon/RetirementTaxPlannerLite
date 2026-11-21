@@ -44,13 +44,17 @@ from rtpl.app.profile_form import compact_form, money_box
 from rtpl.engine.forward import spousal_topup
 from rtpl.engine.rmd import rmd_start_age
 from rtpl.engine.social_security import full_retirement_age
+from rtpl.taxlaw.loader import TaxLawLibrary
 from rtpl.model.plan import (
     ACCOUNT_KINDS,
     BENEFICIARY_KINDS,
     COLA_INCOME_KINDS,
     COLA_KINDS,
     INCOME_KINDS,
+    QCD_KINDS,
+    QCD_MIN_AGE,
     RULE_GROWTH_KINDS,
+    RULE_MODES,
     SPENDING_SOURCES,
     RULE_KINDS,
     ROTH_KINDS,
@@ -119,7 +123,19 @@ MODE_LABELS = {
     "fill": "Fill up to a target",
     "spread": "Spread the balance evenly (1/N)",
     "all": "The whole balance",
+    "rmd": "The year's RMD from this account",
 }
+
+QCD_TIP = (
+    "A qualified charitable distribution goes straight from an IRA to a\n"
+    "charity. It is left out of income (so it can't also be deducted) and\n"
+    "counts toward the account's RMD; only the rest of the RMD is taxed.\n"
+    "Traditional and inherited IRAs only (SEP and SIMPLE IRAs once the\n"
+    "employer has stopped contributing), not 401(k)s or 403(b)s.\n"
+    "The owner must be 70\u00bd on the day of the gift. With only birth\n"
+    "years, the plan starts QCDs in the year they turn 71; someone born\n"
+    "January to June can start late in the year they turn 70."
+)
 
 
 def short_money(v: float) -> str:
@@ -951,6 +967,19 @@ class PersonForm(ItemForm):
         self.spousal_hint.setText(" ".join(hints))
 
 
+_LIBRARY: list[TaxLawLibrary] = []
+
+
+def _shipped_law(year: int, inflation: float):
+    """The shipped federal law for ``year`` (for hints in the forms), or None."""
+    try:
+        if not _LIBRARY:
+            _LIBRARY.append(TaxLawLibrary())
+        return _LIBRARY[0].federal(year, inflation)
+    except (KeyError, OSError, ValueError):
+        return None
+
+
 class RuleForm(ItemForm):
     def __init__(self) -> None:
         super().__init__()
@@ -977,19 +1006,30 @@ class RuleForm(ItemForm):
             self.target.addItem(label, t)
         self.magi = self.row("MAGI amount", money_box(), "In that year's dollars")
         self.deadline = self.note_row("Deadline")
+        self.qcd_hint = self.hint_row()
+        self.qcd_hint.setToolTip(QCD_TIP)
         self.note = self.row("Note", QLineEdit())
         self.watch(self.kind, self.account, self.to_account, self.start, self.end, self.mode, self.amount,
                    self.growth, self.growth_rate, self.target, self.magi, self.note)
 
     def _accounts(self, kind: str) -> list[tuple[str, str]]:
         assert self.plan is not None
-        ok = (lambda a: a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira") if kind == "roth_conversion" \
-            else (lambda a: True)
+        if kind == "roth_conversion":
+            ok = lambda a: a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira"  # noqa: E731
+        elif kind == "qcd":
+            ok = lambda a: a.kind in QCD_KINDS  # noqa: E731
+        else:
+            ok = lambda a: True  # noqa: E731
         return [(a.label(self.plan.profile), a.id) for a in self.plan.accounts if ok(a)]
+
+    def _fill_modes(self, kind: str, current: str) -> None:
+        modes = RULE_MODES.get(kind, tuple(MODE_LABELS))
+        set_items(self.mode, [(MODE_LABELS[m], m) for m in modes], current)
 
     def _fill_accounts(self) -> None:
         r: Rule = self.obj
         set_items(self.account, self._accounts(r.kind), r.account)
+        self._fill_modes(r.kind, r.mode)
         roths = [("Owner's Roth IRA", None)] + [
             (a.label(self.plan.profile), a.id) for a in self.plan.accounts if a.kind in ROTH_KINDS]
         set_items(self.to_account, roths, r.to_account)
@@ -1001,7 +1041,6 @@ class RuleForm(ItemForm):
         for w, when in ((self.start, r.start), (self.end, r.end)):
             w.set_plan(self.plan)
             w.set_value(when)
-        self.mode.setCurrentIndex(max(0, self.mode.findData(r.mode)))
         self.amount.setValue(r.amount)
         self.growth.setCurrentIndex(max(0, self.growth.findData(r.growth)))
         self.growth_rate.setValue(100 * r.growth_rate)
@@ -1027,7 +1066,7 @@ class RuleForm(ItemForm):
         if start is not None:
             r.start = start
         r.end = self.end.value()
-        r.mode = self.mode.currentData()
+        r.mode = self.mode.currentData() or r.mode
         r.amount = self.amount.value()
         r.growth = self.growth.currentData()
         r.growth_rate = self.growth_rate.value() / 100
@@ -1057,6 +1096,25 @@ class RuleForm(ItemForm):
         self.show_row(self.growth_rate, mode == "fixed" and self.growth.currentData() == "fixed")
         self.show_row(self.target, mode == "fill")
         self.show_row(self.magi, mode == "fill" and self.target.currentData() == "magi")
+        is_qcd = self.kind.currentData() == "qcd"
+        self.show_row(self.qcd_hint, is_qcd)
+        if is_qcd and self.plan is not None:
+            self.qcd_hint.setText(self._qcd_text(acct))
+
+    def _qcd_text(self, acct: Account | None) -> str:
+        """The limit and first year for a QCD, shown under the rule."""
+        plan = self.plan
+        y0 = plan.start_year
+        parts = []
+        law = _shipped_law(y0, plan.inflation)
+        if law is not None:
+            parts.append(f"Limit ${law.qcd_limit:,.0f} a person in {y0}, rising with inflation.")
+        if acct is not None and acct.owner is not None and acct.owner < len(plan.profile.people):
+            p = plan.profile.people[acct.owner]
+            parts.append(f"{p.name} can give from {p.birth_year + QCD_MIN_AGE} (age {QCD_MIN_AGE}).")
+        parts.append("Not taxed, and counts toward this account's RMD; the money goes to charity, "
+                     "not to spending.")
+        return " ".join(parts)
 
 
 class AssumptionsForm(ItemForm):
@@ -1199,7 +1257,8 @@ class PlanEditor(QWidget):
         self.add_actions: dict[str, object] = {}
         for key, text in (("account", "Account"), ("income", "Income stream"),
                           ("one_time", "One-time income (sale, gift, bonus)"), (None, None),
-                          ("roth_conversion", "Roth conversion"), ("withdrawal", "Withdrawal")):
+                          ("roth_conversion", "Roth conversion"), ("withdrawal", "Withdrawal"),
+                          ("qcd", "Qualified charitable distribution (QCD)")):
             if key is None:
                 self.add_menu.addSeparator()
                 continue
@@ -1370,11 +1429,12 @@ class PlanEditor(QWidget):
             acct = plan.account(obj.account)
             name = acct.label(profile) if acct else obj.account
             how = {"fixed": short_money(obj.amount), "fill": f"fill to {target_label(obj.target)}",
-                   "spread": "spread evenly (1/N)", "all": "whole balance"}.get(obj.mode, obj.mode)
-            verb = "Convert" if obj.kind == "roth_conversion" else "Withdraw from"
+                   "spread": "spread evenly (1/N)", "all": "whole balance", "rmd": "the RMD"}.get(obj.mode, obj.mode)
+            verb = {"roth_conversion": "Convert", "qcd": "QCD from"}.get(obj.kind, "Withdraw from")
             text = f"{verb} {name}: {how}"
             first, last = obj.years(profile)
-            bar = (first, last, color if obj.kind == "roth_conversion" else "#6250d6", 0)
+            bar_color = {"roth_conversion": color, "qcd": "#1f9e8f"}.get(obj.kind, "#6250d6")
+            bar = (first, last, bar_color, 0)
             tip = obj.describe(profile, {a.id: a for a in plan.accounts}) + (f"\n{obj.note}" if obj.note else "")
         else:
             a = obj
@@ -1484,13 +1544,23 @@ class PlanEditor(QWidget):
                                    start=When(year=y0 + 1), end=When(year=y0 + 1))
             plan.incomes.append(obj)
         else:
-            sources = [a for a in plan.accounts
-                       if what != "roth_conversion" or a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira"]
+            if what == "qcd":
+                sources = [a for a in plan.accounts if a.kind in QCD_KINDS]
+            else:
+                sources = [a for a in plan.accounts
+                           if what != "roth_conversion" or a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira"]
             if not sources:
-                need = "a traditional IRA or 401(k)" if what == "roth_conversion" else "an account"
+                need = {"roth_conversion": "a traditional IRA or 401(k)",
+                        "qcd": "a traditional or inherited IRA"}.get(what, "an account")
                 QMessageBox.information(self, "Add strategy", f"Add {need} first.")
                 return
-            if what == "roth_conversion":
+            if what == "qcd":
+                owner = sources[0].owner if sources[0].owner is not None else 0
+                first = max(y0, plan.profile.people[min(owner, len(plan.profile.people) - 1)].birth_year
+                            + QCD_MIN_AGE)
+                obj = Rule(kind="qcd", account=sources[0].id, start=When(year=first),
+                           end=When(event="last_death"), mode="rmd")
+            elif what == "roth_conversion":
                 obj = Rule(kind="roth_conversion", account=sources[0].id, start=When(year=y0),
                            end=When(year=y0 + 4), mode="fill", target="bracket:0.12")
             else:
