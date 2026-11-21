@@ -63,6 +63,10 @@ class Household:
     other_ordinary_income: float = 0.0
     other_investment_income: float = 0.0  # rents, royalties, passive (in NIIT)
     adjustments: float = 0.0  # above-the-line deductions (HSA, etc.)
+    # HSA contributions deducted (forward plans; the marginal graph puts
+    # them in adjustments). Kept apart so states without the deduction can
+    # add them back.
+    hsa_deduction: float = 0.0
     itemized_deductions: float = 0.0  # 0 = take the standard deduction
     has_taxable_brokerage: bool = False
     aca_marketplace: bool = False  # someone buys ACA marketplace coverage

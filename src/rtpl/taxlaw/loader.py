@@ -145,6 +145,11 @@ class FederalLaw:
     # benefits are withheld (None = not applied, for a user file without it).
     earnings_test_under_fra: float | None = None
     earnings_test_fra_year: float | None = None
+    # Health savings accounts: yearly contribution limits for self-only and
+    # family coverage, and the catch-up at 55 or older (None = not in the file).
+    hsa_self_only: float | None = None
+    hsa_family: float | None = None
+    hsa_catch_up: float = 1000.0
 
     @property
     def senior_deduction_active(self) -> bool:
@@ -164,6 +169,7 @@ def _parse_federal(raw: dict) -> FederalLaw:
     aca = raw["aca"]
     cg = raw["capital_gains"]
     et = raw["social_security"].get("earnings_test", {})
+    hsa = raw.get("hsa", {})
     return FederalLaw(
         year=int(raw["year"]),
         status=str(raw.get("status", "enacted")),
@@ -210,6 +216,9 @@ def _parse_federal(raw: dict) -> FederalLaw:
         qcd_split_interest_limit=float(raw.get("qcd", {}).get("split_interest_limit", 0)),
         earnings_test_under_fra=float(et["under_fra"]) if "under_fra" in et else None,
         earnings_test_fra_year=float(et["fra_year"]) if "fra_year" in et else None,
+        hsa_self_only=float(hsa["self_only"]) if "self_only" in hsa else None,
+        hsa_family=float(hsa["family"]) if "family" in hsa else None,
+        hsa_catch_up=float(hsa.get("catch_up", 1000)),
     )
 
 
@@ -240,6 +249,8 @@ class StateLaw:
     taxes_social_security: bool
     brackets: dict[str, Schedule]
     standard_deduction: dict[str, float]
+    # The state adds HSA contributions back (no deduction): California, New Jersey.
+    taxes_hsa_contributions: bool = False
     exemption_per_person: float = 0.0
     credit_per_person: float = 0.0  # personal exemption given as a credit
     filer_credit: dict[str, float] | None = None  # flat nonrefundable credit by status
@@ -319,6 +330,7 @@ def _parse_state(raw: dict) -> StateLaw:
         name=str(raw.get("name", raw["code"])),
         year=raw.get("year"),
         taxes_social_security=bool(raw.get("taxes_social_security", False)),
+        taxes_hsa_contributions=bool(raw.get("taxes_hsa_contributions", False)),
         brackets=brackets,
         standard_deduction=_status_table(raw.get("standard_deduction")),
         exemption_per_person=float(raw.get("exemption", {}).get("per_person", 0.0)),
@@ -483,6 +495,12 @@ class TaxLawLibrary:
             for k in ("under_fra", "fra_year"):
                 if k in et:
                     et[k] = _round_down(et[k] * factor, step)
+        if "hsa_limits" in idx and "hsa" in raw:
+            # The catch-up is fixed in statute; only the two limits are indexed.
+            step = idx["hsa_limits"]
+            for k in ("self_only", "family"):
+                if k in raw["hsa"]:
+                    raw["hsa"][k] = _round_down(raw["hsa"][k] * factor, step)
         for flag, last in sunsets.items():
             if year > int(last):
                 raw.setdefault("policy", {})[flag] = False

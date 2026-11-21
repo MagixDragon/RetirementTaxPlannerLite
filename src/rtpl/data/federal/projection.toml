@@ -23,6 +23,7 @@ aca_fpl = 10
 # average wage (a whole $10 a month); inflation stands in for wage growth.
 earnings_test = 120
 qcd_limits = 1000            # QCD annual and split-interest limits, rounded down to $1,000
+hsa_limits = 50              # HSA self-only and family limits, rounded down to $50 (the catch-up is not indexed)
 
 [sunsets]
 # Policy switches that turn off after a given year, applied while projecting.

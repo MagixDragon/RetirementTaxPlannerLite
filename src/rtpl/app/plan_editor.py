@@ -50,6 +50,9 @@ from rtpl.model.plan import (
     BENEFICIARY_KINDS,
     COLA_INCOME_KINDS,
     COLA_KINDS,
+    CONTRIBUTION_KINDS,
+    HSA_CATCH_UP_AGE,
+    HSA_COVERAGE,
     INCOME_KINDS,
     QCD_KINDS,
     QCD_MIN_AGE,
@@ -124,7 +127,24 @@ MODE_LABELS = {
     "spread": "Spread the balance evenly (1/N)",
     "all": "The whole balance",
     "rmd": "The year's RMD from this account",
+    "max": "The most allowed each year",
 }
+
+HSA_TIP = (
+    "HSA contributions need high-deductible health plan coverage and no\n"
+    "Medicare, but no earned income. The plan takes the coverage as given\n"
+    "for the years of the rule. The money comes from the year's cash flow\n"
+    "and is deducted from income (California and New Jersey add it back).\n"
+    "Limits: self-only or family coverage (spouses with family coverage\n"
+    "share one family limit), plus $1,000 from 55, which only goes into\n"
+    "the HSA the person owns. Employer contributions count toward the\n"
+    "limit, so lower a fixed amount by them.\n"
+    "Medicare stops contributions. With only birth years the plan stops in\n"
+    "the year a person turns 65. If the baseline says they are not on\n"
+    "Medicare at 65, they can go on until Social Security starts, but\n"
+    "Part A is then backdated up to 6 months: stop contributing 6 months\n"
+    "before claiming Social Security or applying for Medicare."
+)
 
 QCD_TIP = (
     "A qualified charitable distribution goes straight from an IRA to a\n"
@@ -989,6 +1009,11 @@ class RuleForm(ItemForm):
         for k, label in RULE_KINDS.items():
             self.kind.addItem(label, k)
         self.account = self.row("From account", ComboBox())
+        self.coverage = self.row("Health plan coverage", ComboBox(),
+                                 "Self-only or family high-deductible health plan coverage;\n"
+                                 "it sets the yearly limit")
+        for k, label in HSA_COVERAGE.items():
+            self.coverage.addItem(label, k)
         self.to_account = self.row("Into", ComboBox())
         self.start = self.row("Starts", WhenEdit(start=True))
         self.end = self.row("Ends (last year)", WhenEdit("Same year (one year only)"))
@@ -1010,8 +1035,10 @@ class RuleForm(ItemForm):
         self.deadline = self.note_row("Deadline")
         self.qcd_hint = self.hint_row()
         self.qcd_hint.setToolTip(QCD_TIP)
+        self.hsa_hint = self.hint_row()
+        self.hsa_hint.setToolTip(HSA_TIP)
         self.note = self.row("Note", QLineEdit())
-        self.watch(self.kind, self.account, self.to_account, self.start, self.end, self.mode, self.amount,
+        self.watch(self.kind, self.account, self.coverage, self.to_account, self.start, self.end, self.mode, self.amount,
                    self.growth, self.growth_rate, self.target, self.magi, self.note)
 
     def _accounts(self, kind: str) -> list[tuple[str, str]]:
@@ -1020,6 +1047,8 @@ class RuleForm(ItemForm):
             ok = lambda a: a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira"  # noqa: E731
         elif kind == "qcd":
             ok = lambda a: a.kind in QCD_KINDS  # noqa: E731
+        elif kind == "hsa_contribution":
+            ok = lambda a: a.kind == "hsa" and a.owner is not None  # noqa: E731
         else:
             ok = lambda a: True  # noqa: E731
         return [(a.label(self.plan.profile), a.id) for a in self.plan.accounts if ok(a)]
@@ -1044,6 +1073,7 @@ class RuleForm(ItemForm):
             w.set_plan(self.plan)
             w.set_value(when)
         self.amount.setValue(r.amount)
+        self.coverage.setCurrentIndex(max(0, self.coverage.findData(r.coverage)))
         self.growth.setCurrentIndex(max(0, self.growth.findData(r.growth)))
         self.growth_rate.setValue(100 * r.growth_rate)
         if r.target.startswith("magi:"):
@@ -1070,6 +1100,7 @@ class RuleForm(ItemForm):
         r.end = self.end.value()
         r.mode = self.mode.currentData() or r.mode
         r.amount = self.amount.value()
+        r.coverage = self.coverage.currentData() or r.coverage
         r.growth = self.growth.currentData()
         r.growth_rate = self.growth_rate.value() / 100
         t = self.target.currentData()
@@ -1102,6 +1133,38 @@ class RuleForm(ItemForm):
         self.show_row(self.qcd_hint, is_qcd)
         if is_qcd and self.plan is not None:
             self.qcd_hint.setText(self._qcd_text(acct))
+        is_hsa = self.kind.currentData() == "hsa_contribution"
+        word = "Into account" if self.kind.currentData() in CONTRIBUTION_KINDS else "From account"
+        self.form.labelForField(self.account).setText(word)
+        self.account.setAccessibleName(word)
+        self.show_row(self.coverage, is_hsa)
+        self.show_row(self.hsa_hint, is_hsa)
+        if is_hsa and self.plan is not None:
+            self.hsa_hint.setText(self._hsa_text(acct))
+
+    def _hsa_text(self, acct: Account | None) -> str:
+        """The limits, catch-up and last year for an HSA contribution, shown under the rule."""
+        plan = self.plan
+        y0 = plan.start_year
+        parts = []
+        law = _shipped_law(y0, plan.inflation)
+        if law is not None and law.hsa_self_only is not None:
+            parts.append(f"{y0} limit ${law.hsa_self_only:,.0f} self-only or ${law.hsa_family:,.0f} family "
+                         "(shared by spouses), rising with inflation; no earned income needed.")
+        if acct is not None and acct.owner is not None and acct.owner < len(plan.profile.people):
+            i = acct.owner
+            p = plan.profile.people[i]
+            catch = max(y0, p.birth_year + HSA_CATCH_UP_AGE)
+            parts.append(f"{p.name} adds $1,000 from {catch} (age {catch - p.birth_year}), into this HSA only.")
+            last = plan.hsa_last_year(i)
+            if last is None:
+                parts.append(f"{p.name} is on Medicare, so can't contribute.")
+            elif p.medicare_part_b is False:
+                parts.append(f"Last year: {last}, before Medicare Part A starts with Social Security "
+                             "(backdated up to 6 months).")
+            else:
+                parts.append(f"Last year: {last}, before Medicare at 65.")
+        return " ".join(parts)
 
     def _qcd_text(self, acct: Account | None) -> str:
         """The limit and first year for a QCD, shown under the rule."""
@@ -1260,7 +1323,8 @@ class PlanEditor(QWidget):
         for key, text in (("account", "Account"), ("income", "Income stream"),
                           ("one_time", "One-time income (sale, gift, bonus)"), (None, None),
                           ("roth_conversion", "Roth conversion"), ("withdrawal", "Withdrawal"),
-                          ("qcd", "Qualified charitable distribution (QCD)")):
+                          ("qcd", "Qualified charitable distribution (QCD)"),
+                          ("hsa_contribution", "HSA contribution")):
             if key is None:
                 self.add_menu.addSeparator()
                 continue
@@ -1431,11 +1495,14 @@ class PlanEditor(QWidget):
             acct = plan.account(obj.account)
             name = acct.label(profile) if acct else obj.account
             how = {"fixed": short_money(obj.amount), "fill": f"fill to {target_label(obj.target)}",
-                   "spread": "spread evenly (1/N)", "all": "whole balance", "rmd": "the RMD"}.get(obj.mode, obj.mode)
-            verb = {"roth_conversion": "Convert", "qcd": "QCD from"}.get(obj.kind, "Withdraw from")
+                   "spread": "spread evenly (1/N)", "all": "whole balance", "rmd": "the RMD",
+                   "max": "the most allowed"}.get(obj.mode, obj.mode)
+            verb = {"roth_conversion": "Convert", "qcd": "QCD from",
+                    "hsa_contribution": "Contribute to"}.get(obj.kind, "Withdraw from")
             text = f"{verb} {name}: {how}"
             first, last = obj.years(profile)
-            bar_color = {"roth_conversion": color, "qcd": "#1f9e8f"}.get(obj.kind, "#6250d6")
+            bar_color = {"roth_conversion": color, "qcd": "#1f9e8f",
+                         "hsa_contribution": "#b8559a"}.get(obj.kind, "#6250d6")
             bar = (first, last, bar_color, 0)
             tip = obj.describe(profile, {a.id: a for a in plan.accounts}) + (f"\n{obj.note}" if obj.note else "")
         else:
@@ -1548,12 +1615,15 @@ class PlanEditor(QWidget):
         else:
             if what == "qcd":
                 sources = [a for a in plan.accounts if a.kind in QCD_KINDS]
+            elif what == "hsa_contribution":
+                sources = [a for a in plan.accounts if a.kind == "hsa" and a.owner is not None]
             else:
                 sources = [a for a in plan.accounts
                            if what != "roth_conversion" or a.kind in TRADITIONAL_KINDS or a.kind == "inherited_ira"]
             if not sources:
                 need = {"roth_conversion": "a traditional IRA or 401(k)",
-                        "qcd": "a traditional or inherited IRA"}.get(what, "an account")
+                        "qcd": "a traditional or inherited IRA",
+                        "hsa_contribution": "an HSA"}.get(what, "an account")
                 QMessageBox.information(self, "Add strategy", f"Add {need} first.")
                 return
             if what == "qcd":
@@ -1562,6 +1632,12 @@ class PlanEditor(QWidget):
                             + QCD_MIN_AGE)
                 obj = Rule(kind="qcd", account=sources[0].id, start=When(year=first),
                            end=When(event="last_death"), mode="rmd")
+            elif what == "hsa_contribution":
+                owner = min(sources[0].owner, len(plan.profile.people) - 1)
+                last = plan.hsa_last_year(owner)
+                end = When(age=last - plan.profile.people[owner].birth_year, person=owner) if last else None
+                obj = Rule(kind="hsa_contribution", account=sources[0].id, start=When(year=y0), end=end,
+                           mode="max", coverage="family" if len(plan.profile.people) > 1 else "self")
             elif what == "roth_conversion":
                 obj = Rule(kind="roth_conversion", account=sources[0].id, start=When(year=y0),
                            end=When(year=y0 + 4), mode="fill", target="bracket:0.12")

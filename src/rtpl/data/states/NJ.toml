@@ -7,6 +7,8 @@ name = "New Jersey"
 year = 2026
 sources = ["Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (Jan 1, 2026)"]
 taxes_social_security = false
+# No deduction for HSA contributions: the state adds them back to income.
+taxes_hsa_contributions = true
 notes = [
   "Pension/retirement exclusion (income-limited, with a cliff at $150K) not modelled; extra $1,000 exemption at 65+ not modelled.",
 ]

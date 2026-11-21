@@ -11,10 +11,13 @@ Each year:
    the RMD of the account it comes from, so only the rest is taxed.
 3. Income streams (wages, pensions, one-off gains), Social Security (own,
    spousal and survivor benefits) and taxable-account yields.
-4. Rules: Roth conversions and withdrawals, fixed amounts first, then
-   "fill to a target" rules, each solved against the full tax return.
+4. HSA contributions (deducted from income), within each person's limit
+   for their coverage and the months before Medicare. Then rules: Roth
+   conversions and withdrawals, fixed amounts first, then "fill to a
+   target" rules, each solved against the full tax return.
 5. Tax with ``compute_tax()`` and that year's (possibly projected) law.
-6. Cash flow: income minus spending, tax and IRMAA surcharges. A surplus
+6. Cash flow: income minus spending, tax, IRMAA surcharges and HSA
+   contributions. A surplus
    goes into the taxable account; a deficit is taken from the account
    types in the plan's spending order (by default cash, then the taxable
    account). Gains realized on sales and withdrawals from traditional
@@ -37,7 +40,18 @@ import copy
 import math
 from dataclasses import dataclass, field
 
-from rtpl.model.plan import QCD_KINDS, QCD_MIN_AGE, ROTH_KINDS, TRADITIONAL_KINDS, Account, Plan, Rule
+from rtpl.model.plan import (
+    CONTRIBUTION_KINDS,
+    HSA_CATCH_UP_AGE,
+    HSA_COVERAGE,
+    QCD_KINDS,
+    QCD_MIN_AGE,
+    ROTH_KINDS,
+    TRADITIONAL_KINDS,
+    Account,
+    Plan,
+    Rule,
+)
 from rtpl.model.profile import Household, Person, Profile
 from rtpl.taxlaw.loader import FederalLaw, StateLaw, TaxLawLibrary, status_key
 
@@ -124,6 +138,9 @@ class YearResult:
     # Qualified charitable distributions (account id -> amount). They count
     # toward the account's RMD, so ``rmds`` holds only the taxable rest.
     qcds: dict[str, float] = field(default_factory=dict)
+    # HSA contributions (account id -> amount), paid from the year's cash
+    # flow and deducted from income.
+    contributions: dict[str, float] = field(default_factory=dict)
     # Social Security withheld under the earnings test (person index -> amount).
     ss_withheld: dict[int, float] = field(default_factory=dict)
     # Income and Social Security received, less spending, tax and IRMAA
@@ -202,6 +219,7 @@ class _Year:
     ltcg: float = 0.0
     other_ordinary: float = 0.0  # includes the taxable part of foreign pensions
     tax_exempt: float = 0.0
+    hsa_deduction: float = 0.0  # HSA contributions, an above-the-line deduction
 
     def add(self, attr: str, owner: int | None, amount: float) -> None:
         d = getattr(self, attr)
@@ -578,6 +596,7 @@ class PlanEngine:
             long_term_capital_gains=y.ltcg,
             other_ordinary_income=y.other_ordinary,
             adjustments=h.adjustments * infl,
+            hsa_deduction=y.hsa_deduction,
             itemized_deductions=h.itemized_deductions * infl,
             has_taxable_brokerage=h.has_taxable_brokerage,
             aca_marketplace=h.aca_marketplace,
@@ -817,12 +836,16 @@ class PlanEngine:
                     sources.append(Source("other_ordinary", f"yield:{a.id}", f"{labels[a.id]} interest", intr))
                     reinvested[a.id] = intr
 
-            # 4. rules: fixed, spread and all first, then fill rules
+            # 4. HSA contributions (they lower income, so before fill rules),
+            # then rules: fixed, spread and all first, then fill rules
+            contributed = self._apply_hsa_contributions(
+                [r for r in active if r.kind == "hsa_contribution"], year, by_id, labels, law, notes)
+            y.hsa_deduction = sum(contributed.values())
             conversions: dict[str, tuple[str, float]] = {}
             fills = []
             for r in active:
-                if r.kind == "qcd":
-                    continue  # applied with the RMDs
+                if r.kind == "qcd" or r.kind in CONTRIBUTION_KINDS:
+                    continue  # QCDs were applied with the RMDs, contributions above
                 if r.mode == "fill":
                     fills.append(r)
                     continue
@@ -854,7 +877,7 @@ class PlanEngine:
                 self._add_cover_income(y_try, sale_plan, by_id, living)
                 prof = self.build_profile(year, y_try, fs)
                 tax = compute_tax(prof, law, self.state_law)
-                net = inflow - (spending + tax.total_tax + surcharge)
+                net = inflow - (spending + tax.total_tax + surcharge + y.hsa_deduction)
                 new_plan, short = self._cover_deficit(-net, accounts, bal, withdrawn, basis)
                 new_taxed = _taxed_cover(new_plan, by_id)
                 done = all(abs(a - b) < 1.0 for a, b in zip(new_taxed, taxed))
@@ -899,6 +922,10 @@ class PlanEngine:
                 rate = dest.return_rate if dest is not None and dest.return_rate is not None \
                     else plan.assumptions.return_rate
                 bal[target_id] = bal.get(target_id, 0.0) + amount * (1 + rate)
+            for acct_id, amount in contributed.items():
+                dest = by_id[acct_id]
+                rate = dest.return_rate if dest.return_rate is not None else plan.assumptions.return_rate
+                bal[acct_id] += amount * (1 + rate)
             if surplus > 0:
                 dest = next((a for a in accounts if a.kind == "taxable"), None) or next(
                     a for a in accounts if a.kind == "cash")
@@ -936,6 +963,7 @@ class PlanEngine:
                 conversions={k: v for k, v in converted.items() if v > 0.005},
                 withdrawals={k: v for k, v in other_out.items() if v > 0.005},
                 qcds={k: v for k, v in self._qcd.items() if v > 0.005},
+                contributions={k: v for k, v in contributed.items() if v > 0.005},
                 ss_withheld={k: v for k, v in withheld.items() if v > 0.005},
                 net_cash_flow=net,
                 marginal_rate=marginal,
@@ -1071,6 +1099,74 @@ class PlanEngine:
             used[acct.owner] = used.get(acct.owner, 0.0) + amount
             out[acct.id] = out.get(acct.id, 0.0) + amount
             sources.append(Source("qcd", f"qcd:{acct.id}", f"{labels[acct.id]} QCD", amount))
+        return out
+
+    def _apply_hsa_contributions(self, rules: list[Rule], year, by_id, labels, law: FederalLaw,
+                                 notes: list[str]) -> dict[str, float]:
+        """Put each HSA contribution rule's amount into its HSA, in rule
+        order. Returns the contribution to each account (account id -> amount).
+
+        There is no earned-income test. Each person's limit is the year's
+        self-only or family limit for their coverage, plus the catch-up
+        from 55, prorated to the months before Medicare. Spouses with family
+        coverage share one family limit (the first rule in the list fills
+        it first); a catch-up only goes into the HSA its person owns, which
+        every HSA in the plan is (HSAs are individual).
+        """
+        out: dict[str, float] = {}
+        if not rules:
+            return out
+        if law.hsa_self_only is None or law.hsa_family is None:
+            notes.append(f"No HSA limits in the {year} tax law; HSA contributions skipped")
+            return out
+        people = self.profile.people
+        base_used: dict[int, float] = {}  # each person's contributions under the self-only or family limit
+        catch_used: dict[int, float] = {}
+        family_used = 0.0  # spouses with family coverage share one limit
+        noted: set[tuple[int, str]] = set()
+        for r in rules:
+            orig = self.plan.account(r.account)
+            acct = by_id.get(r.account)
+            if acct is None or orig is None or orig.owner is None or orig.kind != "hsa":
+                continue
+            i = orig.owner
+            if not self.alive(i, year):
+                continue
+            name = people[i].name
+            months = self.plan.hsa_months(i, year)
+            if months <= 0:
+                if self.plan.hsa_months(i, year - 1) > 0 and (i, "medicare") not in noted:
+                    notes.append(f"{name}: HSA contributions stop with Medicare")
+                    noted.add((i, "medicare"))
+                continue
+            frac = months / 12
+            family = r.coverage == "family"
+            limit = (law.hsa_family if family else law.hsa_self_only) * frac
+            base_room = max(0.0, limit - base_used.get(i, 0.0))
+            if family:
+                base_room = min(base_room, max(0.0, law.hsa_family - family_used))
+            catch_limit = law.hsa_catch_up * frac if people[i].age_in(year) >= HSA_CATCH_UP_AGE else 0.0
+            catch_room = max(0.0, catch_limit - catch_used.get(i, 0.0))
+            room = base_room + catch_room
+            want = room if r.mode == "max" else r.fixed_amount(self.plan, year)
+            amount = max(0.0, min(want, room))
+            if want > room + 0.5:
+                cover = HSA_COVERAGE.get(r.coverage, r.coverage).lower()
+                notes.append(f"{labels[acct.id]}: HSA contribution capped at ${room:,.0f}, what is left of "
+                             f"{name}'s {year} limit ({cover} coverage"
+                             f"{', with the catch-up' if catch_limit else ''})")
+            if months < 12 and amount > 0 and (i, "months") not in noted:
+                notes.append(f"{name}: HSA limit prorated to {months} month{'s' if months != 1 else ''} "
+                             "before Medicare")
+                noted.add((i, "months"))
+            if amount <= 0:
+                continue
+            base = min(amount, base_room)
+            base_used[i] = base_used.get(i, 0.0) + base
+            if family:
+                family_used += base
+            catch_used[i] = catch_used.get(i, 0.0) + (amount - base)
+            out[acct.id] = out.get(acct.id, 0.0) + amount
         return out
 
     def _cover_deficit(self, deficit: float, accounts, bal, withdrawn, basis):
@@ -1307,7 +1403,7 @@ TABLE_COLUMNS: tuple[TableColumn, ...] = (
     TableColumn("spending", "Spending", True, "The year's spending (Assumptions), grown with inflation"),
     TableColumn("net_cash_flow", "Net cash flow", True,
                 "Income, Social Security and withdrawals by rule,\n"
-                "less spending, tax and IRMAA.\n"
+                "less spending, tax, IRMAA and HSA contributions.\n"
                 "A surplus is saved; a deficit is taken from the accounts\n"
                 "in the spending order."),
     TableColumn("shortfall", "Shortfall", False, "Spending and tax the spending order could not cover"),
@@ -1321,6 +1417,10 @@ TABLE_COLUMNS: tuple[TableColumn, ...] = (
     TableColumn("qcds", "QCDs by account", True,
                 "Qualified charitable distributions: given straight to charity,\n"
                 "not taxed, and counted toward the account's RMD.\n"
+                "Shown only when the plan has some."),
+    TableColumn("contributions", "HSA contributions by account", True,
+                "Paid into each HSA from the year's cash flow and deducted\n"
+                "from income (not in California or New Jersey).\n"
                 "Shown only when the plan has some."),
     TableColumn("balances", "Balances by account", False, "Each account's balance at the end of the year"),
     TableColumn("total_balances", "Total balances", True, "All accounts at the end of the year"),
@@ -1419,10 +1519,10 @@ def table_data(result: PlanResult, *, todays_dollars: bool = False, columns: lis
             money_col("Net cash flow", c.tip, lambda yr: yr.net_cash_flow)
         elif k == "shortfall":
             money_col("Shortfall", c.tip, lambda yr: yr.shortfall)
-        elif k in ("rmds", "conversions", "withdrawals", "qcds", "balances"):
+        elif k in ("rmds", "conversions", "withdrawals", "qcds", "contributions", "balances"):
             attr = "balances_end" if k == "balances" else k
             word = {"rmds": "RMD", "conversions": "conversion", "withdrawals": "withdrawals",
-                    "qcds": "QCD", "balances": "balance"}[k]
+                    "qcds": "QCD", "contributions": "contribution", "balances": "balance"}[k]
             ids = account_ids(attr)
             if k == "balances":
                 ids = [i for i in ids if any(yr.balances_end.get(i, 0) > 0.5 or yr.balances_start.get(i, 0) > 0.5
