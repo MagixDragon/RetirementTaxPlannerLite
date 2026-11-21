@@ -124,6 +124,8 @@ class YearResult:
     # Qualified charitable distributions (account id -> amount). They count
     # toward the account's RMD, so ``rmds`` holds only the taxable rest.
     qcds: dict[str, float] = field(default_factory=dict)
+    # Social Security withheld under the earnings test (person index -> amount).
+    ss_withheld: dict[int, float] = field(default_factory=dict)
     # Income and Social Security received, less spending, tax and IRMAA
     # surcharges: a surplus is saved; a deficit is taken from the spending
     # order, and what that can't cover is the shortfall.
@@ -275,6 +277,12 @@ class PlanEngine:
         self.inherited_rules = {a.id: a.inherited_rule(plan.profile) for a in plan.accounts}
         self._taken_before: dict[str, float] = {}
         self._qcd: dict[str, float] = {}
+        # Earnings test: months withheld so far (credited at full retirement
+        # age), and this year's withheld amounts and notes.
+        self._credit_own: dict[int, int] = {}
+        self._credit_spousal: dict[int, int] = {}
+        self.ss_withheld: dict[int, float] = {}
+        self.ss_notes: list[str] = []
 
     # -- people ----------------------------------------------------------
     def alive(self, i: int, year: int) -> bool:
@@ -302,13 +310,34 @@ class PlanEngine:
         if ss.ssdi:
             amount = self._ssdi_year(p.birth_year, ss, year) * cola
             return amount, (1.0 if amount > 0 else 0.0)
+        credit = self._own_credit(i, year)
         if ss.current_benefit is not None:
-            return ss.current_benefit * cola, 1.0
+            return ss.current_benefit * cola * credit, 1.0
         if ss.fra_benefit <= 0:
             # No benefit of their own, but filing still starts any spousal benefit.
             return 0.0, ssa.claim_year_fraction(year, p.birth_year, ss.claim_age)
-        factor = ssa.own_benefit_factor(p.birth_year, ss.claim_age)
+        factor = ssa.own_benefit_factor(p.birth_year, ss.claim_age) * credit
         return ss.fra_benefit * factor * cola, ssa.claim_year_fraction(year, p.birth_year, ss.claim_age)
+
+    def _credits_apply(self, i: int, year: int) -> bool:
+        """True once the benefit is recalculated for months withheld under
+        the earnings test: from the year after full retirement age is
+        reached (that year itself if it is reached in January)."""
+        fy, months = ssa.fra_year_and_months(self.profile.people[i].birth_year)
+        return year > fy or (year == fy and months == 0)
+
+    def _own_credit(self, i: int, year: int) -> float:
+        """How much the recalculation at full retirement age raises the own benefit."""
+        months = self._credit_own.get(i, 0)
+        if not months or not self._credits_apply(i, year):
+            return 1.0
+        birth = self.profile.people[i].birth_year
+        claim = self.plan.people[i].social_security.claim_age
+        fra = ssa.full_retirement_age(birth)
+        if claim >= fra:
+            return 1.0
+        later = min(fra, claim + months / 12)
+        return ssa.own_benefit_factor(birth, later) / ssa.own_benefit_factor(birth, claim)
 
     @staticmethod
     def _ssdi_year(birth_year: int, ss, year: int) -> float:
@@ -339,10 +368,17 @@ class PlanEngine:
     def _ss_claim_year(self, i: int) -> int:
         return ss_claim_year(self.plan, i)
 
-    def social_security(self, year: int) -> dict[int, float]:
-        out: dict[int, float] = {}
+    def social_security(self, year: int, law: FederalLaw | None = None) -> dict[int, float]:
+        """Benefits paid in ``year``, by person. Call it once a year, in
+        order, with that year's ``law`` to apply the earnings test: what it
+        withholds goes to ``ss_withheld`` and the months withheld raise the
+        benefit from full retirement age."""
         people = self.profile.people
         cola = (1 + self.plan.ss_cola) ** (year - self.plan.start_year)
+        paid: dict[int, float] = {}
+        spousal_paid: dict[int, float] = {}
+        start_month: dict[int, int] = {}  # first month paid this year (0 = January)
+        survivor: set[int] = set()
         for i in self.living(year):
             own, frac = self._ss_own(i, year)
             amount = own * frac
@@ -358,7 +394,11 @@ class PlanEngine:
                     if excess > 0:
                         start = max(self._ss_claim_year(i), self._ss_claim_year(j))
                         age_at_start = start - people[i].birth_year
-                        amount += excess * ssa.spousal_factor(people[i].birth_year, age_at_start) * min(frac, other_frac)
+                        if self._credit_spousal.get(i) and self._credits_apply(i, year):
+                            age_at_start += self._credit_spousal[i] / 12
+                        spousal_paid[i] = excess * ssa.spousal_factor(people[i].birth_year, age_at_start) \
+                            * min(frac, other_frac)
+                        amount += spousal_paid[i]
             elif j is not None and not self.alive(j, year):
                 # Survivor: the larger of their own benefit and the deceased's.
                 dy = self.plan.death_year(j)
@@ -366,10 +406,98 @@ class PlanEngine:
                 claimed = self._ss_claim_year(j) <= dy
                 pia_dead = self.plan.people[j].social_security.fra_benefit * cola
                 surv = ssa.survivor_amount(pia_dead, dj_own if claimed else None)
+                if surv > (own if frac > 0 else 0.0):
+                    survivor.add(i)
+                    frac = 1.0
                 amount = max(own if frac > 0 else 0.0, surv)
             if amount > 0:
-                out[i] = amount
-        return out
+                paid[i] = amount
+                start_month[i] = min(11, round(12 * (1 - frac)))
+        self.ss_withheld = {}
+        self.ss_notes = []
+        if law is not None and law.earnings_test_under_fra is not None:
+            self._earnings_test(year, law, paid, spousal_paid, start_month, survivor)
+        for i in self.living(year):
+            months = self._credit_own.get(i, 0) or self._credit_spousal.get(i, 0)
+            fy, m = ssa.fra_year_and_months(people[i].birth_year)
+            if months and year == (fy if m == 0 else fy + 1):
+                self.ss_notes.append(
+                    f"{people[i].name}: Social Security raised at full retirement age for "
+                    f"{months} month{'s' if months != 1 else ''} withheld under the earnings test")
+        return {i: a for i, a in paid.items() if a > 0.005}
+
+    def wages_of(self, i: int, year: int) -> float:
+        """Person ``i``'s wages for the earnings test (before any pre-tax deferrals)."""
+        return sum(self.stream_amount(s, year) for s in self.plan.incomes
+                   if s.kind == "wages" and (s.owner or 0) == i)
+
+    def _earnings_test(self, year: int, law: FederalLaw, paid: dict[int, float], spousal_paid: dict[int, float],
+                       start_month: dict[int, int], survivor: set[int]) -> None:
+        """Withhold benefits for wages over the limit, before full retirement age.
+
+        $1 for every $2 over the lower limit before the year full retirement
+        age is reached; $1 for every $3 over the higher limit in that year,
+        counting only the wages and benefits of the months before it. A
+        person's wages withhold their own check and a spouse's spousal
+        top-up (it is paid on their record) in the same months. Whole months
+        withheld are credited back at each one's full retirement age."""
+        people = self.profile.people
+        for i in list(paid):
+            ss = self.plan.people[i].social_security
+            if ss.ssdi:
+                continue  # SSDI has its own work rules
+            fy, m = ssa.fra_year_and_months(people[i].birth_year)
+            if year < fy:
+                limit, per, months = law.earnings_test_under_fra, 2, 12
+            elif year == fy and m > 0:
+                limit, per, months = law.earnings_test_fra_year, 3, m
+            else:
+                continue
+            wages = self.wages_of(i, year) * months / 12
+            due = max(0.0, wages - limit) / per
+            if due <= 0:
+                continue
+            # The checks paid on this person's record in the months before
+            # full retirement age: their own check (own benefit, spousal
+            # top-up or survivor benefit) and the spouse's spousal top-up.
+            # SSA withholds whole months of the family's checks together, so
+            # each gives up the same share of its months.
+            j = 1 - i if len(people) == 2 else None
+            s = start_month.get(i, 0)
+            avail_i = paid[i] * max(0, months - s) / (12 - s)
+            rate_i = paid[i] / (12 - s)  # monthly
+            avail_j = rate_j = 0.0
+            if j is not None and spousal_paid.get(j, 0) > 0 and paid.get(j, 0) > 0:
+                sj = start_month.get(j, 0)
+                avail_j = min(spousal_paid[j] * max(0, months - sj) / (12 - sj), paid[j])
+                rate_j = spousal_paid[j] / (12 - sj)
+            pool = avail_i + avail_j
+            if pool <= 0:
+                continue
+            share = min(1.0, due / pool)
+            take = avail_i * share
+            if take > 0:
+                paid[i] -= take
+                self.ss_withheld[i] = self.ss_withheld.get(i, 0.0) + take
+                whole = int(take / rate_i + 1e-6) if rate_i > 0 else 0
+                if i not in survivor:
+                    self._credit_own[i] = self._credit_own.get(i, 0) + whole
+                    if spousal_paid.get(i):
+                        self._credit_spousal[i] = self._credit_spousal.get(i, 0) + whole
+            take_j = avail_j * share
+            if take_j > 0:
+                paid[j] -= take_j
+                spousal_paid[j] -= take_j
+                self.ss_withheld[j] = self.ss_withheld.get(j, 0.0) + take_j
+                whole = int(take_j / rate_j + 1e-6) if rate_j > 0 else 0
+                # Credited at the spouse's own full retirement age.
+                self._credit_spousal[j] = self._credit_spousal.get(j, 0) + whole
+            took = take + take_j
+            if took > 0.5:
+                self.ss_notes.append(
+                    f"{people[i].name}: ${took:,.0f} of Social Security withheld under the earnings test "
+                    f"(wages ${wages:,.0f}{' before full retirement age' if months < 12 else ''}, "
+                    f"over the ${limit:,.0f} limit)")
 
     # -- incomes ---------------------------------------------------------
     def stream_amount(self, s, year: int) -> float:
@@ -519,6 +647,7 @@ class PlanEngine:
     def run(self, *, with_lines: bool = True) -> PlanResult:
         plan, profile = self.plan, self.profile
         self.deadlines = {a.id: a.deadline_year(profile) for a in plan.accounts}
+        self._credit_own, self._credit_spousal = {}, {}
         accounts = [copy.deepcopy(a) for a in plan.accounts]
         by_id = {a.id: a for a in accounts}
         bal = {a.id: a.balance for a in accounts}
@@ -657,9 +786,11 @@ class PlanEngine:
                     y.add("other_ordinary", owner, taxable)
                     sources.append(Source("other_ordinary", key, label, amt))
 
-            for i, amt in self.social_security(year).items():
+            for i, amt in self.social_security(year, law).items():
                 y.add("ss", i, amt)
                 sources.append(Source("ss", f"ss:{i}", f"{profile.people[i].name} Social Security", amt))
+            withheld = dict(self.ss_withheld)
+            notes.extend(self.ss_notes)
 
             # taxable-account yields (reinvested)
             reinvested: dict[str, float] = {}
@@ -805,6 +936,7 @@ class PlanEngine:
                 conversions={k: v for k, v in converted.items() if v > 0.005},
                 withdrawals={k: v for k, v in other_out.items() if v > 0.005},
                 qcds={k: v for k, v in self._qcd.items() if v > 0.005},
+                ss_withheld={k: v for k, v in withheld.items() if v > 0.005},
                 net_cash_flow=net,
                 marginal_rate=marginal,
                 gains_by_rate=_gains_by_rate(tax, law, fs),
@@ -1151,6 +1283,11 @@ TABLE_COLUMNS: tuple[TableColumn, ...] = (
     TableColumn("filing", "Filing status", True),
     TableColumn("income", "Income by type", True,
                 "One column per income type, or per source with\n\"Show each source separately\""),
+    TableColumn("ss_withheld", "Social Security withheld (earnings test)", True,
+                "Benefits held back for wages over the earnings test limit\n"
+                "before full retirement age, one column per person. They are\n"
+                "not lost: the benefit is raised at full retirement age.\n"
+                "Shown only when the plan has some."),
     TableColumn("total_income", "Total income", True),
     TableColumn("agi", "AGI", True),
     TableColumn("taxable_income", "Taxable income", True),
@@ -1251,6 +1388,9 @@ def table_data(result: PlanResult, *, todays_dollars: bool = False, columns: lis
                 for cat in CATEGORIES:
                     if any(yr.category_totals()[cat] for yr in years):
                         money_col(CATEGORY_LABELS[cat], "", lambda yr, cat=cat: yr.category_totals()[cat])
+        elif k == "ss_withheld":
+            for i in sorted({i for yr in years for i in yr.ss_withheld}):
+                money_col(f"{people[i].name} SS withheld", c.tip, lambda yr, i=i: yr.ss_withheld.get(i, 0.0))
         elif k == "total_income":
             money_col("Total income", "", lambda yr: yr.total_income)
         elif k == "agi":

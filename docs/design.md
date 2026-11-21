@@ -375,6 +375,20 @@ means it stops applying once the plan starts in a later year.
    covers a return to work: nothing is paid until the claiming age, which
    then works as an ordinary claim. While a benefit is suspended, the
    spouse's spousal benefit on that record stops too.
+   **Earnings test.** Before full retirement age, a person's wages (the
+   whole Wages amount, as gross pay) withhold $1 of benefits for every $2
+   over SSA's lower limit; in the year FRA is reached, $1 for every $3 over
+   the higher limit, counting only the months before FRA. The limits are in
+   each federal year file (`earnings_test`) and grow with inflation after
+   the last one, standing in for wage growth. A person's wages withhold
+   their own check (own, spousal or survivor benefit) and the spouse's
+   spousal top-up, which is paid on their record, in the same months, as
+   SSA withholds whole months of the family's checks together. The spouse's
+   own benefit is not touched by them. Whole months withheld are credited
+   back at each person's own FRA: the own benefit (and spousal top-up) is
+   recomputed as if claimed that many months later. The year table's *SS withheld* column and the notes show
+   both. SSDI is left out (it has its own work rules), and pensions, IRA
+   withdrawals and investment income never count.
 5. **Rules.** Fixed, spread and whole-balance rules first, then fill rules
    in list order; each fill amount is solved by bisection on the whole
    return.
@@ -434,7 +448,9 @@ marketplace coverage.
 to match the income each feeds. **Year table.** For screen readers and
 copying. The suggested columns are ages, filing status, income by
 category, total income, AGI, taxable income, IRMAA MAGI, federal and state
-tax, IRMAA, spending, net cash flow, total balances and notes. The
+tax, IRMAA, spending, net cash flow, total balances and notes, plus
+Social Security withheld under the earnings test (per person) and QCDs
+when the plan has any. The
 **Columns…** button (also the column headers' right-click menu) adds or
 removes: qualified dividends and gains by the rate they are taxed at (0%,
 15%, 20%; any under the deductions count as 0%), the marginal rate on the
@@ -470,8 +486,14 @@ first year.
   12 − *M* months that year).
 * After SSDI ends early, a later early claim takes the full early-claiming
   reduction (the credit for months already on SSDI is not applied).
-* No Social Security earnings test; no early-survivor reduction; a survivor
-  steps up the year after the death.
+* Earnings test: wages count evenly across the year (no birth month, so
+  birthdays are January); the first-year monthly test (a month with low
+  wages pays in full) is not applied; the higher benefit for withheld
+  months starts the year after full retirement age is reached (that year
+  if FRA is in January); months withheld from a survivor benefit are not
+  credited, since the early-survivor reduction isn't modelled either.
+* No early-survivor reduction; a survivor steps up the year after the
+  death.
 * Spousal and survivor benefits assume the couple stays married to each
   other; divorced-spouse benefits are not modelled.
 * State taxes treat foreign pensions as other ordinary income (no state

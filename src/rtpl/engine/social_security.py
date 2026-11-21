@@ -7,7 +7,10 @@ Simplifications (listed in docs/design.md):
 * Birth month is not known, so a benefit claimed at age A starts in
   January of the year the person reaches A. A claim at A years and M
   months pays (12 - M) months in that year.
-* The earnings test before full retirement age is not applied.
+* The earnings test counts the year's wages evenly across its months. The
+  first-year monthly test (a month with low wages pays in full) is not
+  applied, and the benefit is raised for months withheld from the year
+  after full retirement age is reached (that year, if FRA is in January).
 * A survivor who is under their own full retirement age gets the
   deceased's benefit without the early-survivor reduction.
 """
@@ -26,6 +29,16 @@ def full_retirement_age(birth_year: int) -> float:
     if birth_year <= 1959:
         return 66.0 + (birth_year - 1954) * 2 / 12
     return 67.0
+
+
+def fra_year_and_months(birth_year: int) -> tuple[int, int]:
+    """The year full retirement age is reached, and the months before it in that year.
+
+    With no birth month, birthdays are taken as January, as for claiming.
+    """
+    fra = full_retirement_age(birth_year)
+    whole = int(fra)
+    return birth_year + whole, round((fra - whole) * 12)
 
 
 def own_benefit_factor(birth_year: int, claim_age: float) -> float:

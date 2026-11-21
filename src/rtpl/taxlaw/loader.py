@@ -141,6 +141,10 @@ class FederalLaw:
     qcd_split_interest_limit: float = 0.0
     projected_from: int | None = None
     inflation_used: float | None = None
+    # Social Security retirement earnings test: yearly wages allowed before
+    # benefits are withheld (None = not applied, for a user file without it).
+    earnings_test_under_fra: float | None = None
+    earnings_test_fra_year: float | None = None
 
     @property
     def senior_deduction_active(self) -> bool:
@@ -159,6 +163,7 @@ def _parse_federal(raw: dict) -> FederalLaw:
     irmaa = raw["irmaa"]
     aca = raw["aca"]
     cg = raw["capital_gains"]
+    et = raw["social_security"].get("earnings_test", {})
     return FederalLaw(
         year=int(raw["year"]),
         status=str(raw.get("status", "enacted")),
@@ -203,6 +208,8 @@ def _parse_federal(raw: dict) -> FederalLaw:
         aca_cliff_pct=float(aca["subsidy_cliff_pct"]),
         qcd_limit=float(raw.get("qcd", {}).get("annual_limit", 100_000)),
         qcd_split_interest_limit=float(raw.get("qcd", {}).get("split_interest_limit", 0)),
+        earnings_test_under_fra=float(et["under_fra"]) if "under_fra" in et else None,
+        earnings_test_fra_year=float(et["fra_year"]) if "fra_year" in et else None,
     )
 
 
@@ -469,6 +476,13 @@ class TaxLawLibrary:
             for k in ("annual_limit", "split_interest_limit"):
                 if k in raw["qcd"]:
                     raw["qcd"][k] = _round_down(raw["qcd"][k] * factor, step)
+        if "earnings_test" in idx and "earnings_test" in raw["social_security"]:
+            # SSA raises these with the national average wage; inflation stands in for it.
+            step = idx["earnings_test"]
+            et = raw["social_security"]["earnings_test"]
+            for k in ("under_fra", "fra_year"):
+                if k in et:
+                    et[k] = _round_down(et[k] * factor, step)
         for flag, last in sunsets.items():
             if year > int(last):
                 raw.setdefault("policy", {})[flag] = False

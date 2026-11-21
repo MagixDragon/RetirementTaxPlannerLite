@@ -19,6 +19,9 @@ additional_standard_deduction = 50
 capital_gains = 50
 irmaa_thresholds = 1000      # CPI-U indexed, rounded to $1,000 (SSA uses nearest; we round down)
 aca_fpl = 10
+# Social Security earnings test limits. SSA indexes them to the national
+# average wage (a whole $10 a month); inflation stands in for wage growth.
+earnings_test = 120
 qcd_limits = 1000            # QCD annual and split-interest limits, rounded down to $1,000
 
 [sunsets]

@@ -809,7 +809,9 @@ class IncomeForm(ItemForm):
     def __init__(self) -> None:
         super().__init__()
         self.name = self.row("Name", QLineEdit())
-        self.kind = self.row("Type", ComboBox())
+        self.kind = self.row("Type", ComboBox(),
+                             "Wages (gross pay, before 401(k) deferrals) count toward\n"
+                             "the Social Security earnings test before full retirement age")
         for k, label in INCOME_KINDS.items():
             self.kind.addItem(label, k)
         self.owner = self.row("Owner", ComboBox())
