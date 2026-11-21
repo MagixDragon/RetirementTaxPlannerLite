@@ -108,7 +108,6 @@ def apply_app_theme(app: QApplication, mode: str) -> str:
         # Tell Qt too, so nothing follows the system's scheme behind our back
         # (with Windows in dark mode, Fusion's own palette is dark).
         hints.setColorScheme(Qt.ColorScheme.Dark if mode == "dark" else Qt.ColorScheme.Light)
-    app.setStyle(AppStyle())
     pal = QPalette()
     if mode == "dark":
         c = {
@@ -165,6 +164,16 @@ def apply_app_theme(app: QApplication, mode: str) -> str:
         for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText):
             pal.setColor(QPalette.ColorGroup.Disabled, role, QColor("#bebebe"))
     app.setPalette(pal)
+    # Set the style after the palette: changing the style re-polishes every
+    # widget, and widgets with a style sheet (the side panels) take their
+    # colors at that moment. Style sheets are re-applied too, since a
+    # "palette(...)" color in one is read when the sheet is set.
+    app.setStyle(AppStyle())
+    for widget in app.allWidgets():
+        sheet = widget.styleSheet()
+        if sheet:
+            widget.setStyleSheet("")
+            widget.setStyleSheet(sheet)
     return mode
 
 

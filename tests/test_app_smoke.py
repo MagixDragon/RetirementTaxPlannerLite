@@ -355,3 +355,19 @@ def test_light_mode_uses_light_widget_colors_whatever_the_system_scheme(window):
     assert pal.color(QPalette.ColorRole.Base).lightness() > 200
     assert pal.color(QPalette.ColorRole.Mid) != pal.color(QPalette.ColorRole.Window)  # separators show
     window.set_theme_mode("system")
+
+
+@pytest.mark.parametrize("pinned", [True, False])
+def test_side_panels_follow_each_theme_change(window, pinned):
+    window.resize(1024, 740)
+    window.show()
+    panel = window.inputs_panel
+    window.panels.set_pinned(panel, pinned)
+    window.panels.set_open(panel, True)
+    for mode, light in (("light", True), ("dark", False), ("light", True), ("dark", False)):
+        window.set_theme_mode(mode)
+        QtWidgets.QApplication.instance().processEvents()
+        img = panel.grab().toImage()
+        color = img.pixelColor(img.width() // 2, img.height() - 6)
+        assert (color.lightness() > 128) is light, (mode, color.name())
+    window.set_theme_mode("system")
